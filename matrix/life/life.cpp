@@ -1,9 +1,7 @@
 // Conway's Game of Life on the 64 by 64 grid.
 // A live cell stays live with two or three live neighbours.
-// A dead cell is born with three. The field is filled again
-// when it stops changing, or after a few hundred generations.
-// The rule and the 20 percent fill follow the public-domain
-// retro_matrix animation.
+// A dead cell is born with three. About a fifth of the cells start live.
+// The field is filled again when it stops changing, or after a few hundred generations.
 
 #include <cstdint>
 

@@ -17,7 +17,7 @@ struct Ball {
     float reach;
 };
 
-Ball balls[BALL_COUNT] = {
+static Ball balls[BALL_COUNT] = {
     {0.71f, 0.4f, 11.0f, 20.0f},
     {1.05f, 1.7f, 9.0f, 16.0f},
     {0.58f, 3.1f, 13.0f, 22.0f},

@@ -1,7 +1,6 @@
 // Langton's ant on the 64 by 64 grid.
 // On a black cell it turns left. On an orange cell it turns right.
 // Then it flips that cell and steps forward. The ant itself is white.
-// The turn rule follows the public-domain retro_matrix animation.
 
 #include <cstdint>
 #include <cstring>

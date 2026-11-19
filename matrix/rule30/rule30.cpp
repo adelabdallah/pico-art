@@ -1,7 +1,6 @@
 // Rule 30 on the 64 by 64 grid.
 // The top row is the elementary rule, left XOR (centre OR right).
 // Older rows scroll down, so the triangle grows from one live cell.
-// The scroll follows the public-domain retro_matrix animation.
 
 #include <cstdint>
 #include <cstring>

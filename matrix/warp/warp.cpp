@@ -1,6 +1,7 @@
 // Soft blobs from value noise sampled in a warped place.
 // Two octaves, a fixed seed, and a palette that drifts.
-// The motion follows the liquid-distortion idea, sampled with value noise.
+// The warp follows the liquid-distortion sketches at
+// https://github.com/collidingScopes/liquid-shape-distortions
 
 #include <cstdint>
 
@@ -8,7 +9,7 @@
 
 constexpr int PERM_N = 256;
 
-uint8_t perm[PERM_N];
+static uint8_t perm[PERM_N];
 
 struct Stop {
     int red;
@@ -16,7 +17,7 @@ struct Stop {
     int blue;
 };
 
-Stop palette[] = {
+static Stop palette[] = {
     {24, 36, 110},
     {36, 196, 176},
     {236, 72, 138},
@@ -39,17 +40,17 @@ void warp_start() {
     }
 }
 
-int hash_cell(int x, int y) {
+static int hash_cell(int x, int y) {
     int wrapped_x = x & (PERM_N - 1);
     int wrapped_y = y & (PERM_N - 1);
     return perm[(perm[wrapped_x] + wrapped_y) & (PERM_N - 1)];
 }
 
-float fade(float t) {
+static float fade(float t) {
     return t * t * (3.0f - 2.0f * t);
 }
 
-float value_noise(float x, float y) {
+static float value_noise(float x, float y) {
     int x0 = (int)x;
     int y0 = (int)y;
     float tx = fade(x - x0);
@@ -63,13 +64,13 @@ float value_noise(float x, float y) {
     return (ab + (cd - ab) * ty) / 255.0f;
 }
 
-float fbm(float x, float y) {
+static float fbm(float x, float y) {
     float broad = value_noise(x, y);
     float fine = value_noise(x * 2.0f + 19.0f, y * 2.0f + 7.0f);
     return broad * 0.68f + fine * 0.32f;
 }
 
-void colour_at(float field, float shift, int &red, int &green, int &blue) {
+static void colour_at(float field, float shift, int &red, int &green, int &blue) {
     float along = (field + shift) * STOP_COUNT;
     int turns = (int)(along / STOP_COUNT);
     along = along - turns * STOP_COUNT;

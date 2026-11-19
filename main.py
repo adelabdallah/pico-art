@@ -672,9 +672,7 @@ def flush_art(now, live):
 
 
 def flush_plain():
-    # This page stays at full level. Art pages scale by LEVELS once Y
-    # has stored the brightness index. Those low steps also sit close
-    # together after the Unicorn gamma table. Leave this for a later pass.
+    # Settings and the clock stay at full level so the glyphs remain readable.
     for y in range(HEIGHT):
         row = frame[y]
         for x in range(WIDTH):

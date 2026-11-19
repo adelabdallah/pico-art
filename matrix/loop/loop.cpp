@@ -1,8 +1,7 @@
 // Langton's loop on the 64 by 64 grid.
 // Eight states and a rule table grow a sheath that builds a copy of the loop.
-// The rules, the colours, and the loop shape follow the public-domain
-// retro_matrix animation. A generation that changes nothing clears the
-// board and plants the loop at a new spot that fits on the panel.
+// A generation that changes nothing clears the board and plants the loop
+// at a new spot that fits on the panel.
 
 #include <cstdint>
 #include <cstring>

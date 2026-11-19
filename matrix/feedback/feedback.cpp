@@ -12,9 +12,9 @@ constexpr float CY = (PANEL_HEIGHT - 1) / 2.0f;
 constexpr float PI = 3.14159265f;
 constexpr float ZOOM = 1.028f;
 
-uint8_t history[PANEL_PIXELS * 3];
+static uint8_t history[PANEL_PIXELS * 3];
 
-float wrap_coord(float value) {
+static float wrap_coord(float value) {
     float wrapped = fmodf(value, (float)PANEL_WIDTH);
     if (wrapped < 0.0f) {
         wrapped += (float)PANEL_WIDTH;
@@ -22,7 +22,7 @@ float wrap_coord(float value) {
     return wrapped;
 }
 
-void sample_history(float sx, float sy, int &red, int &green, int &blue) {
+static void sample_history(float sx, float sy, int &red, int &green, int &blue) {
     sx = wrap_coord(sx);
     sy = wrap_coord(sy);
     int x0 = (int)sx;

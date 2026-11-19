@@ -1,4 +1,6 @@
-"""Light one Unicorn pixel and read the Pico-UPS-A battery monitor.
+"""One-shot check for the Unicorn Pack and the Pico-UPS-A.
+
+The running handheld program is main.py. This script lights one pixel, prints which pack buttons are held, and reads the battery monitor three times.
 
 Unicorn Pack owns GP8 through GP22. The UPS INA219 stays on the pads it
 ships with: GP6 SDA and GP7 SCL, I2C address 0x43. The shunt is 0.01 ohm,

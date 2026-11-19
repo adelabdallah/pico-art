@@ -23,23 +23,23 @@ constexpr int TURN_PERIOD_MS = 6000;
 constexpr int HUE_CYCLE_MS = 8000;
 constexpr int WAVE_N = 64;
 
-int16_t wave_table[WAVE_N];
+static int16_t wave_table[WAVE_N];
 
-float hue = 0.0f;
-float angle = 0.0f;
-float angle_target = 0.0f;
-float view_cos = 1.0f;
-float view_sin = 0.0f;
-uint32_t next_turn = TURN_PERIOD_MS;
+static float hue = 0.0f;
+static float angle = 0.0f;
+static float angle_target = 0.0f;
+static float view_cos = 1.0f;
+static float view_sin = 0.0f;
+static uint32_t next_turn = TURN_PERIOD_MS;
 
-void make_wave() {
+static void make_wave() {
     for (int i = 0; i < WAVE_N; ++i) {
         float sample = sinf(i * 2.0f * PI / WAVE_N) * 255.0f;
         wave_table[i] = (int16_t)sample;
     }
 }
 
-float wrap_wave(float pos) {
+static float wrap_wave(float pos) {
     float wrapped = fmodf(pos, (float)WAVE_N);
     if (wrapped < 0.0f) {
         wrapped += (float)WAVE_N;
@@ -47,7 +47,7 @@ float wrap_wave(float pos) {
     return wrapped;
 }
 
-float wave_at(float pos) {
+static float wave_at(float pos) {
     pos = wrap_wave(pos);
     int base = (int)pos;
     float frac = pos - base;
@@ -56,7 +56,7 @@ float wave_at(float pos) {
     return first + (second - first) * frac;
 }
 
-float sweep_unit(uint32_t now) {
+static float sweep_unit(uint32_t now) {
     uint32_t phase = now % (SWEEP_MS * 2);
     if (phase <= SWEEP_MS) {
         return phase / (float)SWEEP_MS;
@@ -64,11 +64,11 @@ float sweep_unit(uint32_t now) {
     return (SWEEP_MS * 2 - phase) / (float)SWEEP_MS;
 }
 
-float sweep_float(uint32_t now, float low, float high) {
+static float sweep_float(uint32_t now, float low, float high) {
     return low + (high - low) * sweep_unit(now);
 }
 
-void plasma_rgb(float x, float y, float horizontal, float phase, int &red, int &green, int &blue) {
+static void plasma_rgb(float x, float y, float horizontal, float phase, int &red, int &green, int &blue) {
     float sample = wave_at(x * horizontal + phase) + wave_at(y * 20.0f + phase);
     int level = (int)((sample + 510.0f) / 4.0f);
     if (level < 0) {
@@ -81,12 +81,12 @@ void plasma_rgb(float x, float y, float horizontal, float phase, int &red, int &
     blue = 255 - level;
 }
 
-void update_view() {
+static void update_view() {
     view_cos = cosf(angle);
     view_sin = sinf(angle);
 }
 
-void update_turn(int dt) {
+static void update_turn(int dt) {
     float gap = angle_target - angle;
     if (gap <= 0.000001f) {
         angle = angle_target;

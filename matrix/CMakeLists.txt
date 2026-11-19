@@ -31,7 +31,6 @@ set(HUB75_DIR ${CMAKE_CURRENT_LIST_DIR}/third_party/waveshare/src)
 add_executable(matrix
     main.cpp
     oled.cpp
-    remote.cpp
     plasma/plasma.cpp
     warp/warp.cpp
     feedback/feedback.cpp
@@ -42,6 +41,7 @@ add_executable(matrix
     loop/loop.cpp
     rule30/rule30.cpp
     environment/environment.cpp
+    settings/settings.cpp
     ${HUB75_DIR}/hub75.cpp
     ${HUB75_DIR}/fm6126a.cpp
     ${HUB75_DIR}/rul6024.cpp
@@ -89,8 +89,6 @@ target_compile_definitions(matrix PRIVATE
     HUB75_MULTICORE=true
     FRAME_RATE=false
     HUB75
-    # The panel clock is 266 MHz. A divider of 4 keeps the radio SPI near 33 MHz.
-    CYW43_PIO_CLOCK_DIV_INT=4
 )
 
 set_source_files_properties(${HUB75_DIR}/hub75.cpp PROPERTIES
@@ -111,8 +109,6 @@ target_link_libraries(matrix
     pico_stdlib
     pico_multicore
     pico_flash
-    pico_cyw43_arch_lwip_poll
-    pico_lwip_mdns
     hardware_pio
     hardware_dma
     hardware_clocks

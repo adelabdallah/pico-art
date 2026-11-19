@@ -15,7 +15,7 @@ struct Rates {
     float kill;
 };
 
-Rates rates[] = {
+static Rates rates[] = {
     {0.0367f, 0.0649f},
     {0.0545f, 0.0620f},
     {0.0290f, 0.0570f},
@@ -29,7 +29,7 @@ static float grid_u[2][PANEL_PIXELS];
 static float grid_v[2][PANEL_PIXELS];
 static int current = 0;
 
-int wrap_index(int value, int limit) {
+static int wrap_index(int value, int limit) {
     value %= limit;
     if (value < 0) {
         value += limit;
@@ -37,20 +37,20 @@ int wrap_index(int value, int limit) {
     return value;
 }
 
-float cell(const float *grid, int x, int y) {
+static float cell(const float *grid, int x, int y) {
     x = wrap_index(x, PANEL_WIDTH);
     y = wrap_index(y, PANEL_HEIGHT);
     return grid[y * PANEL_WIDTH + x];
 }
 
-float laplacian(const float *grid, int x, int y) {
+static float laplacian(const float *grid, int x, int y) {
     float centre = cell(grid, x, y);
     float edge = cell(grid, x - 1, y) + cell(grid, x + 1, y) + cell(grid, x, y - 1) + cell(grid, x, y + 1);
     float corner = cell(grid, x - 1, y - 1) + cell(grid, x + 1, y - 1) + cell(grid, x - 1, y + 1) + cell(grid, x + 1, y + 1);
     return edge * 0.2f + corner * 0.05f - centre;
 }
 
-void seed_disc(int cx, int cy, int radius) {
+static void seed_disc(int cx, int cy, int radius) {
     float *u = grid_u[current];
     float *v = grid_v[current];
     for (int y = cy - radius; y <= cy + radius; ++y) {
@@ -69,7 +69,7 @@ void seed_disc(int cx, int cy, int radius) {
     }
 }
 
-void clear_chemicals() {
+static void clear_chemicals() {
     for (int i = 0; i < PANEL_PIXELS; ++i) {
         grid_u[0][i] = 1.0f;
         grid_v[0][i] = 0.0f;
@@ -82,7 +82,7 @@ void clear_chemicals() {
     seed_disc(46, 22, 4);
 }
 
-void rates_at(uint32_t anim_ms, float &feed, float &kill) {
+static void rates_at(uint32_t anim_ms, float &feed, float &kill) {
     uint32_t span = (uint32_t)RATE_SPAN_MS;
     uint32_t cycle = anim_ms % (span * RATE_COUNT);
     int index = (int)(cycle / span);
@@ -95,7 +95,7 @@ void rates_at(uint32_t anim_ms, float &feed, float &kill) {
     kill = rates[index].kill + (rates[next].kill - rates[index].kill) * frac;
 }
 
-float step_chemicals(float feed, float kill) {
+static float step_chemicals(float feed, float kill) {
     const float *u = grid_u[current];
     const float *v = grid_v[current];
     int next = current ^ 1;
@@ -123,7 +123,7 @@ float step_chemicals(float feed, float kill) {
     return peak;
 }
 
-void paint(uint8_t *pixels) {
+static void paint(uint8_t *pixels) {
     const float *v = grid_v[current];
     uint8_t *pixel = pixels;
     for (int i = 0; i < PANEL_PIXELS; ++i) {

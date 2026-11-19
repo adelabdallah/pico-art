@@ -13,6 +13,12 @@
 // While listening, loudness tints the pool and pitch places a glint.
 // A rise in the sound sends a bright pulse from the shore into the pool.
 // The microphone does not change down.
+// Mic and tilt sensitivity come from the settings page.
+// 50 percent is the response tuned in this file.
+// Mic steps are equal ratios of loudness. Tilt steps scale how far a lean counts as poured.
+// Both stay in software, so neither setting drives the sensor harder.
+//
+// static below means the helper exists only in this file. The environment_* functions at the bottom are the public ones.
 
 #include "pattern.hpp"
 
@@ -63,6 +69,9 @@ static float audio_tint = 0.0f;
 static float heard = 0.0f;
 static float noise_rms = 40.0f;
 static float meter_level = 0.0f;
+static float band_level[BANDS] = {};
+static int mic_percent = 50;
+static int imu_percent = 50;
 static bool meter_peak = false;
 static bool listening = false;
 static bool mpu_ready = false;
@@ -150,6 +159,16 @@ static void update_gravity() {
     sensed_y = tilt_y;
 }
 
+// 50 percent leaves the thresholds as written. Each 25 points doubles or halves the loudness that counts.
+static float mic_gain() {
+    return exp2f((mic_percent - 50) / 25.0f);
+}
+
+// 50 percent is one. 100 percent treats half the lean as a full pour. 0 percent ignores tilt.
+static float imu_gain() {
+    return imu_percent / 50.0f;
+}
+
 static void launch_ripple(float amp) {
     int slot = 0;
     for (int i = 1; i < RIPPLES; ++i) {
@@ -206,17 +225,29 @@ static void listen_audio(uint32_t now) {
     }
     glint_x = centroid * (PANEL_WIDTH - 1);
 
-    meter_level = clampf(rms / METER_RMS, 0.0f, 1.0f);
+    float gain = mic_gain();
+    meter_level = clampf(rms * gain / METER_RMS, 0.0f, 1.0f);
     meter_peak = meter_level >= 0.98f;
+    float peak_band = 0.0f;
+    for (int band = 0; band < BANDS; ++band) {
+        if (bands[band] > peak_band) {
+            peak_band = bands[band];
+        }
+    }
+    for (int band = 0; band < BANDS; ++band) {
+        float shaped = peak_band > 0.0f ? bands[band] / peak_band : 0.0f;
+        band_level[band] = clampf(shaped * meter_level, 0.0f, 1.0f);
+    }
 
     float above = rms - noise_rms;
     if (above < 0.0f) {
         above = 0.0f;
     }
-    bool onset = above > ONSET_RMS && rms > noise_rms * 1.9f && (int32_t)(now - last_onset_ms) >= ONSET_GAP_MS;
+    float loud = above * gain;
+    bool onset = loud > ONSET_RMS && rms * gain > noise_rms * 1.9f && (int32_t)(now - last_onset_ms) >= ONSET_GAP_MS;
     if (onset) {
         last_onset_ms = now;
-        launch_ripple(clampf(above / COLOUR_RMS, 0.4f, 1.0f));
+        launch_ripple(clampf(loud / COLOUR_RMS, 0.4f, 1.0f));
         if (splash_goal < 280.0f) {
             splash_goal = 280.0f;
         }
@@ -227,7 +258,7 @@ static void listen_audio(uint32_t now) {
         noise_rms += (rms - noise_rms) * 0.15f;
     }
 
-    heard = clampf(above / COLOUR_RMS, 0.0f, 1.0f);
+    heard = clampf(loud / COLOUR_RMS, 0.0f, 1.0f);
     glint = heard;
     float held = heard * 160.0f;
     if (held > splash_goal) {
@@ -331,7 +362,7 @@ static void step_pool(float dt_s) {
 static void paint(uint8_t *frame) {
     int count = pool_count();
     float mag = sqrtf(flow_x * flow_x + flow_y * flow_y);
-    float pour = smooth_unit(0.04f, 0.26f, mag);
+    float pour = smooth_unit(0.04f, 0.26f, mag * imu_gain());
     float radius = sqrtf(count / PI);
     float line = waterline(shore_x, shore_y, count);
     float mid = (PANEL_WIDTH - 1) * 0.5f;
@@ -429,6 +460,39 @@ void environment_toggle_listen() {
         meter_peak = false;
         glint = 0.0f;
         heard = 0.0f;
+        for (int i = 0; i < BANDS; ++i) {
+            band_level[i] = 0.0f;
+        }
+    }
+}
+
+static int clamp_percent(int percent) {
+    if (percent < 0) {
+        return 0;
+    }
+    if (percent > 100) {
+        return 100;
+    }
+    return percent;
+}
+
+void environment_set_mic_sens(int percent) {
+    mic_percent = clamp_percent(percent);
+}
+
+void environment_set_imu_sens(int percent) {
+    imu_percent = clamp_percent(percent);
+}
+
+void environment_bands(float *out, int count) {
+    if (out == nullptr || count <= 0) {
+        return;
+    }
+    if (count > BANDS) {
+        count = BANDS;
+    }
+    for (int i = 0; i < count; ++i) {
+        out[i] = band_level[i];
     }
 }
 
@@ -491,6 +555,9 @@ void environment_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
         listen_audio(clock_ms);
     } else {
         heard = 0.0f;
+        for (int i = 0; i < BANDS; ++i) {
+            band_level[i] = 0.0f;
+        }
     }
     step_pool(dt_s);
     paint(frame);

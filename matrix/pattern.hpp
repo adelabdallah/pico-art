@@ -3,6 +3,15 @@
 #include <cmath>
 #include <cstdint>
 
+// Every pattern paints the same frame. One pixel is three bytes, blue, then green, then red.
+// main.cpp calls start when the pattern is entered, then draw about every 40 ms.
+//
+// constexpr is a constant fixed when the program is compiled.
+// uint8_t is one byte. uint8_t *frame is the address of the first byte of the picture.
+// static on a function or variable in a .cpp file keeps that name private to the file.
+// float &x lets a function write the caller's own variable.
+// An inline function in this header is compiled into each file that calls it.
+
 constexpr int PANEL_WIDTH = 64;
 constexpr int PANEL_HEIGHT = 64;
 constexpr int PANEL_PIXELS = PANEL_WIDTH * PANEL_HEIGHT;
@@ -154,3 +163,11 @@ float environment_meter();
 bool environment_meter_peak();
 // Live accelerometer X and Y in g. False when the read fails.
 bool environment_axes(float &x_g, float &y_g);
+// percent is 0 to 100. 50 matches the tuned liquid response.
+void environment_set_mic_sens(int percent);
+void environment_set_imu_sens(int percent);
+// Copies the latest listening bands, each 0 to 1. count is capped at 8.
+void environment_bands(float *out, int count);
+
+void settings_start();
+void settings_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
