@@ -18,27 +18,39 @@ if(EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 
-set(PICO_BOARD pico CACHE STRING "Board type")
+set(PICO_BOARD pico2_w CACHE STRING "Board type")
 
 include(pico_sdk_import.cmake)
 
-project(plasma C CXX ASM)
+project(matrix C CXX ASM)
 
 pico_sdk_init()
 
 set(HUB75_DIR ${CMAKE_CURRENT_LIST_DIR}/third_party/waveshare/src)
 
-add_executable(plasma
+add_executable(matrix
+    main.cpp
+    oled.cpp
+    remote.cpp
     plasma/plasma.cpp
+    warp/warp.cpp
+    feedback/feedback.cpp
+    metaballs/metaballs.cpp
+    reaction/reaction.cpp
+    life/life.cpp
+    ant/ant.cpp
+    loop/loop.cpp
+    rule30/rule30.cpp
+    environment/environment.cpp
     ${HUB75_DIR}/hub75.cpp
     ${HUB75_DIR}/fm6126a.cpp
     ${HUB75_DIR}/rul6024.cpp
 )
 
-pico_set_program_name(plasma "plasma")
-pico_set_program_version(plasma "1.0")
+pico_set_program_name(matrix "matrix")
+pico_set_program_version(matrix "1.0")
 set(PICO_PIO_VERSION 1)
-pico_set_float_implementation(plasma pico)
+pico_set_float_implementation(matrix pico)
 
 # Pico RAM is tight at 64x64. Later boards keep the driver's balanced scan.
 if(PICO_BOARD STREQUAL "pico")
@@ -47,7 +59,7 @@ else()
     set(BALANCED_LIGHT_OUTPUT_VALUE true)
 endif()
 
-target_compile_definitions(plasma PRIVATE
+target_compile_definitions(matrix PRIVATE
     USE_PICO_GRAPHICS=false
     MATRIX_PANEL_WIDTH=64
     MATRIX_PANEL_HEIGHT=64
@@ -77,25 +89,35 @@ target_compile_definitions(plasma PRIVATE
     HUB75_MULTICORE=true
     FRAME_RATE=false
     HUB75
+    # The panel clock is 266 MHz. A divider of 4 keeps the radio SPI near 33 MHz.
+    CYW43_PIO_CLOCK_DIV_INT=4
 )
 
 set_source_files_properties(${HUB75_DIR}/hub75.cpp PROPERTIES
     COMPILE_OPTIONS "-include${CMAKE_CURRENT_LIST_DIR}/hub75_compat.hpp"
 )
 
-pico_generate_pio_header(plasma ${HUB75_DIR}/hub75.pio)
+pico_generate_pio_header(matrix ${HUB75_DIR}/hub75.pio)
 
-pico_enable_stdio_uart(plasma 0)
-pico_enable_stdio_usb(plasma 1)
+pico_enable_stdio_uart(matrix 0)
+pico_enable_stdio_usb(matrix 1)
 
-target_include_directories(plasma PRIVATE ${HUB75_DIR})
+target_include_directories(matrix PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}
+    ${HUB75_DIR}
+)
 
-target_link_libraries(plasma
+target_link_libraries(matrix
     pico_stdlib
     pico_multicore
+    pico_flash
+    pico_cyw43_arch_lwip_poll
+    pico_lwip_mdns
     hardware_pio
     hardware_dma
     hardware_clocks
+    hardware_i2c
+    hardware_adc
 )
 
-pico_add_extra_outputs(plasma)
+pico_add_extra_outputs(matrix)
