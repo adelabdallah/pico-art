@@ -17,6 +17,7 @@
 // 50 percent is the response tuned in this file.
 // Mic steps are equal ratios of loudness. Tilt steps scale how far a lean counts as poured.
 // Both stay in software, so neither setting drives the sensor harder.
+// Viscosity is a play control. 0 splashes like water. 100 creeps and barely splashes, like lava.
 //
 // static below means the helper exists only in this file. The environment_* functions at the bottom are the public ones.
 
@@ -74,6 +75,8 @@ static int mic_percent = 50;
 static int imu_percent = 50;
 static bool meter_peak = false;
 static bool listening = false;
+static int viscosity = 0;
+static int viscosity_step = 1;
 static bool mpu_ready = false;
 static uint32_t last_sample_ms = 0;
 static uint32_t last_onset_ms = 0;
@@ -169,6 +172,11 @@ static float imu_gain() {
     return imu_percent / 50.0f;
 }
 
+// 0 leaves the pool watery. 1 holds it thick.
+static float thickness() {
+    return viscosity / 100.0f;
+}
+
 static void launch_ripple(float amp) {
     int slot = 0;
     for (int i = 1; i < RIPPLES; ++i) {
@@ -247,9 +255,11 @@ static void listen_audio(uint32_t now) {
     bool onset = loud > ONSET_RMS && rms * gain > noise_rms * 1.9f && (int32_t)(now - last_onset_ms) >= ONSET_GAP_MS;
     if (onset) {
         last_onset_ms = now;
-        launch_ripple(clampf(loud / COLOUR_RMS, 0.4f, 1.0f));
-        if (splash_goal < 280.0f) {
-            splash_goal = 280.0f;
+        float watery = 1.0f - thickness();
+        launch_ripple(clampf(loud / COLOUR_RMS, 0.4f, 1.0f) * watery);
+        float kicked = 280.0f * watery;
+        if (splash_goal < kicked) {
+            splash_goal = kicked;
         }
     }
     if (rms > noise_rms) {
@@ -260,7 +270,7 @@ static void listen_audio(uint32_t now) {
 
     heard = clampf(loud / COLOUR_RMS, 0.0f, 1.0f);
     glint = heard;
-    float held = heard * 160.0f;
+    float held = heard * 160.0f * (1.0f - thickness());
     if (held > splash_goal) {
         splash_goal = held;
     }
@@ -325,7 +335,8 @@ static void step_pool(float dt_s) {
     if (dt_s < 0.001f) {
         return;
     }
-    float follow = 1.0f - expf(-TILT_SMOOTH * dt_s);
+    float thick = thickness();
+    float follow = 1.0f - expf(-TILT_SMOOTH * (0.08f + 0.92f * (1.0f - thick)) * dt_s);
     flow_x += (sensed_x - flow_x) * follow;
     flow_y += (sensed_y - flow_y) * follow;
     float mag = sqrtf(flow_x * flow_x + flow_y * flow_y);
@@ -333,8 +344,8 @@ static void step_pool(float dt_s) {
         shore_x = flow_x / mag;
         shore_y = flow_y / mag;
     }
-    splash_goal *= expf(-1.6f * dt_s);
-    float ease = 1.0f - expf(-3.0f * dt_s);
+    splash_goal *= expf(-(1.6f + thick * 6.0f) * dt_s);
+    float ease = 1.0f - expf(-(0.35f + 2.65f * (1.0f - thick)) * dt_s);
     splash += (splash_goal - splash) * ease;
     float tint_rate = heard > audio_tint ? 7.0f : 2.0f;
     audio_tint += (heard - audio_tint) * (1.0f - expf(-tint_rate * dt_s));
@@ -345,8 +356,8 @@ static void step_pool(float dt_s) {
         if (ripples[i].amp <= 0.0f) {
             continue;
         }
-        ripples[i].depth += 26.0f * dt_s;
-        ripples[i].amp *= expf(-1.7f * dt_s);
+        ripples[i].depth += 26.0f * (1.0f - thick) * dt_s;
+        ripples[i].amp *= expf(-(1.7f + thick * 4.0f) * dt_s);
         if (ripples[i].amp < 0.04f || ripples[i].depth > 40.0f) {
             ripples[i].amp = 0.0f;
         }
@@ -399,7 +410,8 @@ static void paint(uint8_t *frame) {
             if (deep > 1.0f) {
                 deep = 1.0f;
             }
-            float caustic = 0.5f + 0.5f * sinf(x * 0.65f + y * 0.35f + wave_time);
+            float thick = thickness();
+            float caustic = (0.5f + 0.5f * sinf(x * 0.65f + y * 0.35f + wave_time)) * (1.0f - thick);
             float shine = rim * 0.65f;
             bool on_wall = x == 0 || y == 0 || x == PANEL_WIDTH - 1 || y == PANEL_HEIGHT - 1;
             if (on_wall && depth > 0.0f) {
@@ -435,6 +447,9 @@ static void paint(uint8_t *frame) {
             red += ripple * 220.0f;
             green += ripple * 160.0f;
             blue += ripple * 55.0f;
+            red += thick * (70.0f + rim * 90.0f);
+            green *= 1.0f - thick * 0.72f;
+            blue *= 1.0f - thick * 0.88f;
             red *= cover;
             green *= cover;
             blue *= cover;
@@ -451,6 +466,21 @@ static void paint(uint8_t *frame) {
 
 bool environment_listening() {
     return listening;
+}
+
+int environment_viscosity() {
+    return viscosity;
+}
+
+void environment_step_viscosity() {
+    viscosity += viscosity_step;
+    if (viscosity >= 100) {
+        viscosity = 100;
+        viscosity_step = -1;
+    } else if (viscosity <= 0) {
+        viscosity = 0;
+        viscosity_step = 1;
+    }
 }
 
 void environment_toggle_listen() {

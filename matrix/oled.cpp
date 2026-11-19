@@ -340,6 +340,24 @@ static void paint_icon(uint16_t *bits, OledIcon icon) {
         for (int x = 4; x <= 11; ++x) {
             plot_icon(bits, x, 13);
         }
+        return;
+    }
+    if (icon == OledIcon::Knob) {
+        for (int y = 0; y < 16; ++y) {
+            for (int x = 0; x < 16; ++x) {
+                int dx = x - 8;
+                int dy = y - 9;
+                int dist = dx * dx + dy * dy;
+                if (dist >= 18 && dist <= 34) {
+                    plot_icon(bits, x, y);
+                }
+            }
+        }
+        plot_icon(bits, 8, 1);
+        plot_icon(bits, 8, 2);
+        plot_icon(bits, 8, 3);
+        plot_icon(bits, 7, 4);
+        plot_icon(bits, 9, 4);
     }
 }
 
@@ -468,12 +486,18 @@ static bool present() {
     return true;
 }
 
-void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count) {
+static bool title_off(uint32_t now_ms, bool flash) {
+    return flash && ((now_ms / 280) & 1u) == 1u;
+}
+
+void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count, bool flash) {
     if (!ready || !awake) {
         return;
     }
     std::memset(frame, 0, sizeof frame);
-    draw_title(title, OledIcon::None, now_ms);
+    if (!title_off(now_ms, flash)) {
+        draw_title(title, OledIcon::None, now_ms);
+    }
     if (bands != nullptr && band_count > 0) {
         draw_equalizer(bands, band_count);
     } else {
@@ -482,12 +506,27 @@ void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, i
     present();
 }
 
-void oled_show_setting(const char *label, OledIcon icon, const char *value, float bar, uint32_t now_ms) {
+void oled_show_liquid(const char *title, const char *listen, const char *viscosity, uint32_t now_ms, bool flash) {
     if (!ready || !awake) {
         return;
     }
     std::memset(frame, 0, sizeof frame);
-    draw_title(label, icon, now_ms);
+    if (!title_off(now_ms, flash)) {
+        draw_title(title, OledIcon::None, now_ms);
+    }
+    blit_text(4, 20, listen, 2, 2, 0);
+    blit_text(4, 42, viscosity, 2, 2, 0);
+    present();
+}
+
+void oled_show_setting(const char *label, OledIcon icon, const char *value, float bar, uint32_t now_ms, bool flash) {
+    if (!ready || !awake) {
+        return;
+    }
+    std::memset(frame, 0, sizeof frame);
+    if (!title_off(now_ms, flash)) {
+        draw_title(label, icon, now_ms);
+    }
     draw_value_bar(bar);
     blit_text(82, 24, value, 1, 3, 0);
     present();

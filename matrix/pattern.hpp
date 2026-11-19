@@ -159,6 +159,9 @@ void environment_start();
 void environment_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 bool environment_listening();
 void environment_toggle_listen();
+// 0 is water. 100 is lava. Each step walks one percent, up to 100, then back down to 0.
+int environment_viscosity();
+void environment_step_viscosity();
 float environment_meter();
 bool environment_meter_peak();
 // Live accelerometer X and Y in g. False when the read fails.
@@ -168,6 +171,9 @@ void environment_set_mic_sens(int percent);
 void environment_set_imu_sens(int percent);
 // Copies the latest listening bands, each 0 to 1. count is capped at 8.
 void environment_bands(float *out, int count);
+
+void pipes_start();
+void pipes_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 
 void settings_start();
 void settings_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);

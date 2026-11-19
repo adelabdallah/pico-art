@@ -1,10 +1,11 @@
 // Firmware for a Waveshare P2.5 64x64 HUB75 panel on a Pico.
 //
 // Each pattern lives in its own directory and paints the same framebuffer.
-// Red and orange step between patterns. Yellow turns the picture. Green pauses it.
-// Settings is the last pattern. There, blue picks a value, yellow lowers it, and green raises it.
-// The pattern and the six settings are stored in the last flash sector and restored on boot.
-// Pause and the quarter turns last until power-off. Each pattern starts running.
+// The encoder click flashes the current name and scrolls the pattern list. A second click selects it.
+// Outside that mode, the encoder flings the picture sideways, or edits the open setting.
+// Settings is the last pattern. There, blue picks a value and the encoder raises or lowers it.
+// The pattern and the settings are stored in the last flash sector and restored on boot.
+// Pause, speed, turn, and sideways position last until power-off. Each pattern starts running at full speed.
 //
 // Wire the panel the way the Waveshare Pico example does.
 // GP0 R1, GP1 G1, GP2 B1, GP3 R2, GP4 G2, GP5 B2.
@@ -14,15 +15,20 @@
 //
 // GP14 SDA and GP15 SCL drive the 128 by 64 OLED.
 // The yellow band names the pattern, or the setting while settings is open.
-// The blue band draws a small version of the pattern. On liquid, with the mic on, it is an equalizer.
+// The blue band draws a small version of the pattern. On liquid it shows the mic and the viscosity.
 // The OLED turns off after its timer. A button turns it back on.
 // The dimmest contrast setting is 5 percent.
 // Button C goes to the GPIO and NO goes to ground.
-// Any button wakes the matrix and the OLED. Red GP19 steps back. Orange GP21 steps forward.
-// Yellow GP20 turns the picture a quarter turn clockwise. Green GP26 pauses, and the next press runs it again.
-// On settings, yellow lowers the chosen value and green raises it. A hold keeps stepping.
-// Blue GP22 shifts the hue by a fifth of a turn, and a hold spins it.
-// On liquid, blue toggles the microphone. On settings, blue moves to the next value.
+// Any button, the encoder click, and a turn of the encoder wake the matrix and the OLED.
+// Red GP19 pauses. From a full stop it runs again at full speed.
+// Orange GP21 slows the picture by 5 percent. Yellow GP20 speeds it up by 5 percent. A hold keeps stepping.
+// At double speed the picture pulses, then falls off the bottom and fades back in at full speed.
+// Green GP26 turns 5 degrees clockwise. A hold spins it.
+// Blue GP22 shifts the hue by a fifth of a turn, and a hold spins it, except on settings.
+// On liquid, yellow starts and stops the microphone, and orange steps viscosity by one percent.
+// Viscosity climbs to 100, then walks back to 0. It is not saved. 100 flows like lava.
+// On settings, blue moves to the next value. Elsewhere blue shifts the hue.
+// Encoder A is GP16, B is GP17, and the click is GP18. Each goes to ground. Clockwise is A changing before B.
 //
 // From the matrix directory, with the Pico SDK on PICO_SDK_PATH:
 // cmake -S . -B build -G Ninja -DPICO_BOARD=pico2_w
@@ -39,6 +45,7 @@
 #include "hardware/clocks.h"
 #include "hardware/flash.h"
 #include "hardware/gpio.h"
+#include "hardware/sync.h"
 #include "pico/flash.h"
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
@@ -60,8 +67,18 @@ constexpr float HUE_TAP = 0.2f;
 constexpr int HUE_TAP_MS = 300;
 constexpr float HUE_SPIN = 1.0f;
 constexpr int PAUSE_MS = 2000;
-constexpr int TURN_MS = 500;
 constexpr float TURN_STEP = 1.5707963f;
+constexpr float TAP_TURN = 5.0f * 0.017453292f;
+constexpr int TAP_TURN_MS = 140;
+constexpr float SPIN_PER_MS = 6.2831853f / 2000.0f;
+constexpr float SPEED_STEP = 0.05f;
+constexpr float SPEED_CAP = 3.0f;
+constexpr int OVERDRIVE_MS = 1000;
+constexpr int BURST_FALL_MS = 900;
+constexpr int BURST_FADE_MS = 700;
+constexpr float SHIFT_IMPULSE = 60.0f;
+constexpr float SHIFT_DECAY = 3.5f;
+constexpr float SHIFT_CAP = 800.0f;
 
 // Minutes. A zero LED entry means the matrix stays lit. The OLED list has no forever entry.
 constexpr int LED_MINUTES[] = {1, 2, 5, 10, 15, 30, 60, 0};
@@ -70,14 +87,29 @@ constexpr int LED_TIMER_DEFAULT = 7;
 constexpr int OLED_MINUTES[] = {1, 2, 5, 10, 15, 30, 60};
 constexpr int OLED_TIMER_COUNT = 7;
 constexpr int OLED_TIMER_DEFAULT = 2;
-constexpr int SETTING_COUNT = 6;
+constexpr int SETTING_COUNT = 7;
 constexpr int OLED_BRIGHT_MIN = 5;
+constexpr int ENC_CHOICES[] = {1, 2, 4, 8};
+constexpr int ENC_CHOICE_COUNT = 4;
 
 constexpr int PIN_RED = 19;
 constexpr int PIN_YELLOW = 20;
 constexpr int PIN_ORANGE = 21;
 constexpr int PIN_BLUE = 22;
 constexpr int PIN_GREEN = 26;
+constexpr int PIN_ENC_A = 16;
+constexpr int PIN_ENC_B = 17;
+constexpr int PIN_ENC_CLICK = 18;
+constexpr int ENC_DETENT = 4;
+constexpr int CLICK_GAP_MS = 200;
+
+// One mechanical detent is four quadrature edges. Positive counts are clockwise.
+constexpr int8_t ENC_TABLE[16] = {
+    0, -1, 1, 0,
+    1, 0, 0, -1,
+    -1, 0, 0, 1,
+    0, 1, -1, 0,
+};
 
 static_assert(DISPLAY_WIDTH == PANEL_WIDTH, "panel width is 64");
 static_assert(DISPLAY_HEIGHT == PANEL_HEIGHT, "panel height is 64");
@@ -100,6 +132,7 @@ Pattern patterns[] = {
     {"loop", loop_start, loop_draw},
     {"rule30", rule30_start, rule30_draw},
     {"liquid", environment_start, environment_draw},
+    {"pipes", pipes_start, pipes_draw},
     {"settings", settings_start, settings_draw},
 };
 
@@ -123,6 +156,7 @@ struct SavedPattern {
     uint32_t oled_bright;
     uint32_t led_timer;
     uint32_t oled_timer;
+    uint32_t enc_sens;
 };
 
 struct Settings {
@@ -134,15 +168,22 @@ struct Settings {
     int oled_bright;
     int led_timer;
     int oled_timer;
+    int enc;
     int cursor;
 };
 
 enum class ButtonRole {
-    Previous,
-    Next,
-    Turn,
     Pause,
+    Slow,
+    Fast,
+    Spin,
     Hue,
+};
+
+enum class BurstPhase {
+    Idle,
+    Fall,
+    Fade,
 };
 
 struct SettingRow {
@@ -162,10 +203,10 @@ struct PanelButton {
 
 // Each button shorts its pin to ground. The pull-up makes a press read as 0.
 static PanelButton buttons[] = {
-    {PIN_RED, "red", ButtonRole::Previous, false, false, 0, 0},
-    {PIN_ORANGE, "orange", ButtonRole::Next, false, false, 0, 0},
-    {PIN_YELLOW, "yellow", ButtonRole::Turn, false, false, 0, 0},
-    {PIN_GREEN, "green", ButtonRole::Pause, false, false, 0, 0},
+    {PIN_RED, "red", ButtonRole::Pause, false, false, 0, 0},
+    {PIN_ORANGE, "orange", ButtonRole::Slow, false, false, 0, 0},
+    {PIN_YELLOW, "yellow", ButtonRole::Fast, false, false, 0, 0},
+    {PIN_GREEN, "green", ButtonRole::Spin, false, false, 0, 0},
     {PIN_BLUE, "blue", ButtonRole::Hue, false, false, 0, 0},
 };
 
@@ -176,11 +217,12 @@ static SettingRow setting_rows[] = {
     {"OLED:", OledIcon::Sun},
     {"MIC SENS:", OledIcon::Mic},
     {"IMU SENS:", OledIcon::Axes},
+    {"ENC SENS:", OledIcon::Knob},
     {"LED TIMER:", OledIcon::Hourglass},
     {"OLED TIMER:", OledIcon::Hourglass},
 };
 
-static Settings settings = {0, BRIGHTNESS_PERCENT, 0.0f, 50, 50, 100, LED_TIMER_DEFAULT, OLED_TIMER_DEFAULT, 0};
+static Settings settings = {0, BRIGHTNESS_PERCENT, 0.0f, 50, 50, 100, LED_TIMER_DEFAULT, OLED_TIMER_DEFAULT, 1, 0};
 static uint32_t anim_ms = 0;
 static float anim_frac = 0.0f;
 static bool matrix_blank = false;
@@ -192,6 +234,23 @@ static uint32_t motion_started = 0;
 static bool motion_easing = false;
 static float view_angle = 0.0f;
 static float view_target = 0.0f;
+static bool view_spinning = false;
+static float play_speed = 1.0f;
+static bool overdrive = false;
+static uint32_t overdrive_at = 0;
+static BurstPhase burst = BurstPhase::Idle;
+static uint32_t burst_at = 0;
+static float shift_x = 0.0f;
+static float shift_v = 0.0f;
+static bool selecting = false;
+static bool select_moved = false;
+static int preview = 0;
+static int nav_rest = 0;
+static int enc_rest = 0;
+static volatile int enc_counts = 0;
+static volatile int enc_state = 0;
+static bool click_down = false;
+static uint32_t click_quiet = 0;
 
 static bool hue_tap = false;
 static bool hue_spin = false;
@@ -245,6 +304,9 @@ static Settings load_settings() {
     if (saved->oled_timer < OLED_TIMER_COUNT) {
         loaded.oled_timer = (int)saved->oled_timer;
     }
+    if (saved->enc_sens == 1 || saved->enc_sens == 2 || saved->enc_sens == 4 || saved->enc_sens == 8) {
+        loaded.enc = (int)saved->enc_sens;
+    }
     return loaded;
 }
 
@@ -270,6 +332,7 @@ static void program_settings(void *param) {
     saved->oled_bright = (uint32_t)incoming->oled_bright;
     saved->led_timer = (uint32_t)incoming->led_timer;
     saved->oled_timer = (uint32_t)incoming->oled_timer;
+    saved->enc_sens = (uint32_t)incoming->enc;
     flash_range_erase(PATTERN_OFFSET, FLASH_SECTOR_SIZE);
     flash_range_program(PATTERN_OFFSET, page, FLASH_PAGE_SIZE);
 }
@@ -368,24 +431,41 @@ static void update_motion(uint32_t now) {
 }
 
 static void nudge_turn() {
-    view_target += TURN_STEP;
+    view_target += TAP_TURN;
 }
 
 static void update_turn(int dt_ms) {
-    float gap = view_target - view_angle;
-    if (gap <= 0.0001f) {
-        view_angle = view_target;
+    if (view_spinning) {
+        view_angle += SPIN_PER_MS * dt_ms;
+        view_target = view_angle;
     } else {
-        float step = TURN_STEP * dt_ms / (float)TURN_MS;
-        if (step > gap) {
-            step = gap;
+        float gap = view_target - view_angle;
+        float step = TAP_TURN * dt_ms / (float)TAP_TURN_MS;
+        if (gap > step) {
+            view_angle += step;
+        } else if (gap < -step) {
+            view_angle -= step;
+        } else {
+            view_angle = view_target;
         }
-        view_angle += step;
     }
     constexpr float circle = 6.2831853f;
     if (view_angle > circle * 4.0f) {
         view_angle -= circle * 4.0f;
         view_target -= circle * 4.0f;
+    }
+}
+
+static void update_shift(int dt_ms) {
+    float seconds = dt_ms / 1000.0f;
+    shift_x += shift_v * seconds;
+    shift_v *= expf(-SHIFT_DECAY * seconds);
+    if (shift_v < 2.0f && shift_v > -2.0f) {
+        shift_v = 0.0f;
+    }
+    shift_x = shift_x - (float)PANEL_WIDTH * floorf(shift_x / (float)PANEL_WIDTH);
+    if (shift_x < 0.0f) {
+        shift_x += PANEL_WIDTH;
     }
 }
 
@@ -410,7 +490,8 @@ static void format_timer(char *dst, int size, int minutes) {
 }
 
 static void present_oled(uint32_t now) {
-    if (on_settings()) {
+    bool browsing = selecting && (select_moved || !on_settings());
+    if (on_settings() && !browsing) {
         char value[8];
         float bar = 0.0f;
         int cursor = settings.cursor;
@@ -430,24 +511,36 @@ static void present_oled(uint32_t now) {
             snprintf(value, sizeof value, "%d%%", settings.imu);
             bar = settings.imu / 100.0f;
         } else if (cursor == 4) {
+            snprintf(value, sizeof value, "%d", settings.enc);
+            int choice = 0;
+            for (int i = 0; i < ENC_CHOICE_COUNT; ++i) {
+                if (ENC_CHOICES[i] == settings.enc) {
+                    choice = i;
+                }
+            }
+            bar = (choice + 1) / (float)ENC_CHOICE_COUNT;
+        } else if (cursor == 5) {
             format_timer(value, (int)sizeof value, LED_MINUTES[settings.led_timer]);
             bar = (settings.led_timer + 1) / (float)LED_TIMER_COUNT;
         } else {
             format_timer(value, (int)sizeof value, OLED_MINUTES[settings.oled_timer]);
             bar = (settings.oled_timer + 1) / (float)OLED_TIMER_COUNT;
         }
-        oled_show_setting(setting_rows[cursor].label, setting_rows[cursor].icon, value, bar, now);
+        oled_show_setting(setting_rows[cursor].label, setting_rows[cursor].icon, value, bar, now, selecting);
         return;
     }
+    int shown = browsing ? preview : settings.pattern;
     char title[16];
-    format_title(title, (int)sizeof title, patterns[settings.pattern].name);
-    if (on_environment() && environment_listening()) {
-        float bands[8] = {};
-        environment_bands(bands, 8);
-        oled_show_pattern(title, now, bands, 8);
+    format_title(title, (int)sizeof title, patterns[shown].name);
+    if (on_environment() && shown == settings.pattern) {
+        char listen[8];
+        char thick[8];
+        snprintf(listen, sizeof listen, environment_listening() ? "MIC ON" : "MIC OFF");
+        snprintf(thick, sizeof thick, "%d%%", environment_viscosity());
+        oled_show_liquid(title, listen, thick, now, browsing);
         return;
     }
-    oled_show_pattern(title, now, nullptr, 0);
+    oled_show_pattern(title, now, nullptr, 0, browsing);
 }
 
 static void show_status() {
@@ -456,19 +549,29 @@ static void show_status() {
     present_oled(now);
 }
 
-static void change_pattern(int delta) {
-    settings.pattern += delta;
-    if (settings.pattern >= PATTERN_COUNT) {
-        settings.pattern = 0;
-    } else if (settings.pattern < 0) {
-        settings.pattern = PATTERN_COUNT - 1;
+static void reset_play() {
+    play_speed = 1.0f;
+    overdrive = false;
+    burst = BurstPhase::Idle;
+    clear_pause();
+}
+
+static void commit_pattern(int index) {
+    if (index < 0) {
+        index = PATTERN_COUNT - 1;
+    } else if (index >= PATTERN_COUNT) {
+        index = 0;
     }
+    bool changed = index != settings.pattern;
+    settings.pattern = index;
     anim_ms = 0;
     anim_frac = 0.0f;
-    clear_pause();
+    reset_play();
     patterns[settings.pattern].start();
     show_status();
-    save_settings(settings);
+    if (changed) {
+        save_settings(settings);
+    }
 }
 
 static bool change_brightness(int delta, bool store) {
@@ -483,7 +586,6 @@ static bool change_brightness(int delta, bool store) {
     }
     settings.brightness = brightness;
     apply_matrix_level();
-    show_status();
     if (store) {
         save_settings(settings);
     }
@@ -527,6 +629,19 @@ static bool nudge_setting(int direction, bool store) {
         settings.imu = next;
         environment_set_imu_sens(next);
     } else if (cursor == 4) {
+        int choice = 0;
+        for (int i = 0; i < ENC_CHOICE_COUNT; ++i) {
+            if (ENC_CHOICES[i] == settings.enc) {
+                choice = i;
+            }
+        }
+        int next = choice + direction;
+        if (next < 0 || next >= ENC_CHOICE_COUNT) {
+            return false;
+        }
+        settings.enc = ENC_CHOICES[next];
+        nav_rest = 0;
+    } else if (cursor == 5) {
         int next = settings.led_timer + direction;
         if (next < 0 || next >= LED_TIMER_COUNT) {
             return false;
@@ -540,7 +655,6 @@ static bool nudge_setting(int direction, bool store) {
         settings.oled_timer = next;
         apply_oled_timer();
     }
-    show_status();
     if (store) {
         save_settings(settings);
     }
@@ -644,37 +758,100 @@ static void rotate_exact(uint8_t *pixels, int quarter) {
     std::memcpy(pixels, turned, sizeof turned);
 }
 
-static void sample_pixel(const uint8_t *src, float x, float y, uint8_t *dst) {
-    if (x < 0.0f) {
-        x = 0.0f;
-    } else if (x > PANEL_WIDTH - 1) {
-        x = PANEL_WIDTH - 1;
+constexpr float SEAM = 8.0f;
+
+static float wrap_coord(float value, int limit) {
+    float span = (float)limit;
+    value = value - span * floorf(value / span);
+    if (value < 0.0f) {
+        value += span;
     }
-    if (y < 0.0f) {
-        y = 0.0f;
-    } else if (y > PANEL_HEIGHT - 1) {
-        y = PANEL_HEIGHT - 1;
+    if (value >= span) {
+        value -= span;
     }
+    return value;
+}
+
+static void sample_bilinear(const uint8_t *src, float x, float y, float *out) {
+    x = wrap_coord(x, PANEL_WIDTH);
+    y = wrap_coord(y, PANEL_HEIGHT);
     int x0 = (int)x;
     int y0 = (int)y;
+    if (x0 >= PANEL_WIDTH) {
+        x0 = 0;
+    }
+    if (y0 >= PANEL_HEIGHT) {
+        y0 = 0;
+    }
     int x1 = x0 + 1;
     int y1 = y0 + 1;
     if (x1 >= PANEL_WIDTH) {
-        x1 = PANEL_WIDTH - 1;
+        x1 = 0;
     }
     if (y1 >= PANEL_HEIGHT) {
-        y1 = PANEL_HEIGHT - 1;
+        y1 = 0;
     }
-    float tx = x - x0;
-    float ty = y - y0;
-    const uint8_t *p00 = pixel_at(src, x0, y0);
-    const uint8_t *p10 = pixel_at(src, x1, y0);
-    const uint8_t *p01 = pixel_at(src, x0, y1);
-    const uint8_t *p11 = pixel_at(src, x1, y1);
+    float tx = x - floorf(x);
+    float ty = y - floorf(y);
+    const uint8_t *p00 = src + (y0 * PANEL_WIDTH + x0) * 3;
+    const uint8_t *p10 = src + (y0 * PANEL_WIDTH + x1) * 3;
+    const uint8_t *p01 = src + (y1 * PANEL_WIDTH + x0) * 3;
+    const uint8_t *p11 = src + (y1 * PANEL_WIDTH + x1) * 3;
     for (int channel = 0; channel < 3; ++channel) {
         float value = p00[channel] * (1.0f - tx) * (1.0f - ty) + p10[channel] * tx * (1.0f - ty);
         value += p01[channel] * (1.0f - tx) * ty + p11[channel] * tx * ty;
-        dst[channel] = (uint8_t)(value + 0.5f);
+        out[channel] = value;
+    }
+}
+
+// 0 on the frame edge, 1 once SEAM pixels inward. The opposite edge fades in across that band.
+static float seam_keep(float coord, int limit) {
+    float span = (float)limit;
+    float dist = coord;
+    float far = span - coord;
+    if (far < dist) {
+        dist = far;
+    }
+    if (dist >= SEAM) {
+        return 1.0f;
+    }
+    float t = dist / SEAM;
+    return t * t * (3.0f - 2.0f * t);
+}
+
+static void sample_plane(const uint8_t *src, float x, float y, uint8_t *dst, bool vertical, bool horizontal) {
+    x = wrap_coord(x, PANEL_WIDTH);
+    y = wrap_coord(y, PANEL_HEIGHT);
+    float base[3];
+    sample_bilinear(src, x, y, base);
+    if (vertical) {
+        float keep = seam_keep(x, PANEL_WIDTH);
+        if (keep < 0.999f) {
+            float across[3];
+            sample_bilinear(src, (float)PANEL_WIDTH - x, y, across);
+            for (int channel = 0; channel < 3; ++channel) {
+                base[channel] = base[channel] * keep + across[channel] * (1.0f - keep);
+            }
+        }
+    }
+    if (horizontal) {
+        float keep = seam_keep(y, PANEL_HEIGHT);
+        if (keep < 0.999f) {
+            float across[3];
+            sample_bilinear(src, x, (float)PANEL_HEIGHT - y, across);
+            for (int channel = 0; channel < 3; ++channel) {
+                base[channel] = base[channel] * keep + across[channel] * (1.0f - keep);
+            }
+        }
+    }
+    for (int channel = 0; channel < 3; ++channel) {
+        int value = (int)(base[channel] + 0.5f);
+        if (value < 0) {
+            value = 0;
+        } else if (value > 255) {
+            value = 255;
+        }
+        dst[channel] = (uint8_t)value;
     }
 }
 
@@ -703,25 +880,185 @@ static void rotate_view(uint8_t *pixels) {
             float dy = y - mid;
             float sx = mid + dx * cosine + dy * sine;
             float sy = mid - dx * sine + dy * cosine;
-            sample_pixel(pixels, sx, sy, turned + (y * PANEL_WIDTH + x) * 3);
+            sample_plane(pixels, sx, sy, turned + (y * PANEL_WIDTH + x) * 3, true, true);
         }
     }
     std::memcpy(pixels, turned, sizeof turned);
 }
 
-static void apply_pause_breathe(uint8_t *pixels, uint32_t now) {
-    if (motion > 0.999f) {
+static uint8_t burst_snap[PANEL_PIXELS * 3];
+
+static float pulse_gain(uint32_t now) {
+    float wave = 0.5f + 0.5f * sinf(now * 6.2831853f / 3000.0f);
+    return 0.35f + 0.65f * wave;
+}
+
+static void apply_gain(uint8_t *pixels, float gain) {
+    if (gain > 0.995f && gain < 1.005f) {
         return;
     }
-    float wave = 0.5f + 0.5f * sinf(now * 6.2831853f / 3000.0f);
-    float breathe = 0.35f + 0.65f * wave;
-    float gain = motion + (1.0f - motion) * breathe;
-    if (gain > 0.99f) {
-        return;
+    if (gain < 0.0f) {
+        gain = 0.0f;
     }
     for (int i = 0; i < PANEL_PIXELS * 3; ++i) {
-        pixels[i] = (uint8_t)(pixels[i] * gain + 0.5f);
+        int value = (int)(pixels[i] * gain + 0.5f);
+        if (value > 255) {
+            value = 255;
+        }
+        pixels[i] = (uint8_t)value;
     }
+}
+
+static void paint_fall(uint8_t *pixels, int drop) {
+    std::memset(pixels, 0, PANEL_PIXELS * 3);
+    if (drop < 0) {
+        drop = 0;
+    }
+    if (drop >= PANEL_HEIGHT) {
+        return;
+    }
+    int rows = PANEL_HEIGHT - drop;
+    std::memcpy(pixels + drop * PANEL_WIDTH * 3, burst_snap, (size_t)rows * PANEL_WIDTH * 3);
+}
+
+static void begin_burst(uint8_t *pixels, uint32_t now) {
+    std::memcpy(burst_snap, pixels, sizeof burst_snap);
+    burst = BurstPhase::Fall;
+    burst_at = now;
+    play_speed = 1.0f;
+    overdrive = false;
+    clear_pause();
+}
+
+static void present_frame(uint8_t *pixels, uint32_t now) {
+    if (overdrive && burst == BurstPhase::Idle && (int32_t)(now - overdrive_at) >= OVERDRIVE_MS) {
+        begin_burst(pixels, now);
+    }
+    if (burst == BurstPhase::Fall) {
+        float portion = (float)(now - burst_at) / (float)BURST_FALL_MS;
+        if (portion >= 1.0f) {
+            burst = BurstPhase::Fade;
+            burst_at = now;
+        } else {
+            if (portion < 0.12f) {
+                std::memcpy(pixels, burst_snap, sizeof burst_snap);
+                apply_gain(pixels, 1.15f);
+                return;
+            }
+            float fall = (portion - 0.12f) / 0.88f;
+            paint_fall(pixels, (int)(fall * (PANEL_HEIGHT + 6)));
+            return;
+        }
+    }
+    if (burst == BurstPhase::Fade) {
+        float portion = (float)(now - burst_at) / (float)BURST_FADE_MS;
+        if (portion >= 1.0f) {
+            burst = BurstPhase::Idle;
+            return;
+        }
+        apply_gain(pixels, portion);
+        return;
+    }
+    if (motion < 0.999f) {
+        apply_gain(pixels, motion + (1.0f - motion) * pulse_gain(now));
+        return;
+    }
+    if (overdrive) {
+        apply_gain(pixels, pulse_gain(now));
+    }
+}
+
+static void translate_view(uint8_t *pixels) {
+    if (shift_x < 0.04f || shift_x > PANEL_WIDTH - 0.04f) {
+        return;
+    }
+    for (int y = 0; y < PANEL_HEIGHT; ++y) {
+        for (int x = 0; x < PANEL_WIDTH; ++x) {
+            sample_plane(pixels, x - shift_x, (float)y, turned + (y * PANEL_WIDTH + x) * 3, true, false);
+        }
+    }
+    std::memcpy(pixels, turned, sizeof turned);
+}
+
+static void step_speed(int direction, uint32_t now) {
+    if (burst != BurstPhase::Idle) {
+        return;
+    }
+    int steps = (int)(play_speed / SPEED_STEP + 0.5f);
+    steps += direction;
+    if (steps < 0) {
+        steps = 0;
+    }
+    int cap = (int)(SPEED_CAP / SPEED_STEP + 0.5f);
+    if (steps > cap) {
+        steps = cap;
+    }
+    play_speed = steps * SPEED_STEP;
+    if (play_speed >= 2.0f) {
+        if (!overdrive) {
+            overdrive = true;
+            overdrive_at = now;
+        }
+    } else {
+        overdrive = false;
+    }
+}
+
+static void enc_isr(uint gpio, uint32_t events) {
+    (void)gpio;
+    (void)events;
+    int state = (gpio_get(PIN_ENC_A) << 1) | gpio_get(PIN_ENC_B);
+    int previous = enc_state;
+    enc_counts += ENC_TABLE[(previous << 2) | state];
+    enc_state = state;
+}
+
+static int take_detents() {
+    uint32_t irq = save_and_disable_interrupts();
+    int counts = enc_counts;
+    enc_counts = 0;
+    restore_interrupts(irq);
+    enc_rest += counts;
+    int detents;
+    if (enc_rest >= 0) {
+        detents = enc_rest / ENC_DETENT;
+    } else {
+        detents = -((-enc_rest) / ENC_DETENT);
+    }
+    enc_rest -= detents * ENC_DETENT;
+    // This encoder's A and B run opposite the table, so clockwise arrives negative.
+    return -detents;
+}
+
+static int consume_nav(int detents) {
+    nav_rest += detents;
+    int sens = settings.enc;
+    if (sens < 1) {
+        sens = 1;
+    }
+    int steps;
+    if (nav_rest >= 0) {
+        steps = nav_rest / sens;
+    } else {
+        steps = -((-nav_rest) / sens);
+    }
+    nav_rest -= steps * sens;
+    return steps;
+}
+
+static void setup_encoder() {
+    gpio_init(PIN_ENC_A);
+    gpio_init(PIN_ENC_B);
+    gpio_init(PIN_ENC_CLICK);
+    gpio_set_dir(PIN_ENC_A, GPIO_IN);
+    gpio_set_dir(PIN_ENC_B, GPIO_IN);
+    gpio_set_dir(PIN_ENC_CLICK, GPIO_IN);
+    gpio_pull_up(PIN_ENC_A);
+    gpio_pull_up(PIN_ENC_B);
+    gpio_pull_up(PIN_ENC_CLICK);
+    enc_state = (gpio_get(PIN_ENC_A) << 1) | gpio_get(PIN_ENC_B);
+    gpio_set_irq_enabled_with_callback(PIN_ENC_A, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, enc_isr);
+    gpio_set_irq_enabled(PIN_ENC_B, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
 }
 
 static void setup_buttons() {
@@ -745,52 +1082,59 @@ static void poll_button(PanelButton &button, uint32_t now) {
         button.repeated = false;
         wake_matrix();
     }
-    if (button.role == ButtonRole::Previous || button.role == ButtonRole::Next) {
-        if (pressed) {
-            change_pattern(button.role == ButtonRole::Next ? 1 : -1);
-        }
-        return;
-    }
-    if (on_settings() && (button.role == ButtonRole::Turn || button.role == ButtonRole::Pause)) {
-        int direction = button.role == ButtonRole::Pause ? 1 : -1;
-        if (pressed) {
-            if (!nudge_setting(direction, true)) {
-                show_status();
-            }
-            button.repeat_at = now + HOLD_MS;
-        } else if (down && (int32_t)(now - button.repeat_at) >= 0) {
-            if (nudge_setting(direction, false)) {
-                button.repeated = true;
-            }
-            button.repeat_at = now + BRIGHTNESS_REPEAT_MS;
-        }
-        if (released && button.repeated) {
-            save_settings(settings);
-            button.repeated = false;
-        }
-        return;
-    }
-    if (button.role == ButtonRole::Turn) {
-        if (pressed) {
-            nudge_turn();
-            show_status();
-        }
-        return;
-    }
     if (button.role == ButtonRole::Pause) {
         if (pressed) {
-            toggle_pause(now);
+            if (play_speed <= 0.001f) {
+                play_speed = 1.0f;
+                clear_pause();
+            } else {
+                toggle_pause(now);
+            }
             show_status();
+        }
+        return;
+    }
+    if (on_environment() && button.role == ButtonRole::Fast) {
+        if (pressed) {
+            environment_toggle_listen();
+            show_status();
+        }
+        return;
+    }
+    if (on_environment() && button.role == ButtonRole::Slow) {
+        if (pressed || (down && (int32_t)(now - button.repeat_at) >= 0)) {
+            environment_step_viscosity();
+            button.repeat_at = now + (pressed ? HOLD_MS : BRIGHTNESS_REPEAT_MS);
+            if (pressed) {
+                show_status();
+            }
+        }
+        return;
+    }
+    if (button.role == ButtonRole::Slow || button.role == ButtonRole::Fast) {
+        int direction = button.role == ButtonRole::Fast ? 1 : -1;
+        if (pressed || (down && (int32_t)(now - button.repeat_at) >= 0)) {
+            step_speed(direction, now);
+            button.repeat_at = now + (pressed ? HOLD_MS : BRIGHTNESS_REPEAT_MS);
+            if (pressed) {
+                show_status();
+            }
+        }
+        return;
+    }
+    if (button.role == ButtonRole::Spin) {
+        if (pressed) {
+            nudge_turn();
+        }
+        if (released) {
+            view_spinning = false;
+        } else if (down && (int32_t)(now - button.pressed_at) >= HOLD_MS) {
+            view_spinning = true;
         }
         return;
     }
     if (pressed && on_settings()) {
         settings.cursor = (settings.cursor + 1) % SETTING_COUNT;
-        show_status();
-        return;
-    }
-    if (pressed && on_environment()) {
-        environment_toggle_listen();
         show_status();
         return;
     }
@@ -805,6 +1149,76 @@ static void poll_button(PanelButton &button, uint32_t now) {
         }
     } else if (down && !hue_spin && (int32_t)(now - button.pressed_at) >= HOLD_MS) {
         begin_hue_spin();
+    }
+}
+
+static void poll_encoder(uint32_t now) {
+    bool down = gpio_get(PIN_ENC_CLICK) == 0;
+    bool pressed = down && !click_down;
+    click_down = down;
+    if (down) {
+        note_activity(now);
+    }
+    if (pressed && (int32_t)(now - click_quiet) >= 0) {
+        click_quiet = now + CLICK_GAP_MS;
+        wake_matrix();
+        if (!selecting) {
+            selecting = true;
+            preview = settings.pattern;
+            select_moved = false;
+            nav_rest = 0;
+        } else {
+            selecting = false;
+            nav_rest = 0;
+            if (preview != settings.pattern) {
+                commit_pattern(preview);
+            } else {
+                show_status();
+            }
+        }
+    }
+    int detents = take_detents();
+    if (detents == 0) {
+        return;
+    }
+    note_activity(now);
+    wake_matrix();
+    if (selecting) {
+        int steps = consume_nav(detents);
+        if (steps != 0) {
+            preview += steps;
+            preview %= PATTERN_COUNT;
+            if (preview < 0) {
+                preview += PATTERN_COUNT;
+            }
+            select_moved = true;
+        }
+        return;
+    }
+    if (on_settings()) {
+        int steps = consume_nav(detents);
+        if (steps == 0) {
+            return;
+        }
+        int direction = steps > 0 ? 1 : -1;
+        int count = steps > 0 ? steps : -steps;
+        bool changed = false;
+        for (int i = 0; i < count; ++i) {
+            if (nudge_setting(direction, false)) {
+                changed = true;
+            }
+        }
+        show_status();
+        if (changed) {
+            save_settings(settings);
+        }
+        return;
+    }
+    shift_v += detents * SHIFT_IMPULSE;
+    if (shift_v > SHIFT_CAP) {
+        shift_v = SHIFT_CAP;
+    } else if (shift_v < -SHIFT_CAP) {
+        shift_v = -SHIFT_CAP;
     }
 }
 
@@ -836,6 +1250,7 @@ int main() {
     environment_set_mic_sens(settings.mic);
     environment_set_imu_sens(settings.imu);
     setup_buttons();
+    setup_encoder();
     if (!oled_init()) {
         printf("oled not found\n");
     }
@@ -843,7 +1258,7 @@ int main() {
     oled_set_contrast(settings.oled_bright);
 
     patterns[settings.pattern].start();
-    printf("patterns: plasma, warp, feedback, metaballs, reaction, life, ant, loop, rule30, liquid, settings\n");
+    printf("patterns: plasma, warp, feedback, metaballs, reaction, life, ant, loop, rule30, liquid, pipes, settings\n");
     show_status();
 
     uint32_t oled_at = 0;
@@ -865,10 +1280,16 @@ int main() {
         for (int i = 0; i < BUTTON_COUNT; ++i) {
             poll_button(buttons[i], now);
         }
+        poll_encoder(now);
 
         update_motion(now);
         update_turn(dt);
-        anim_frac += dt * motion;
+        update_shift(dt);
+        float rate = motion * play_speed;
+        if (burst != BurstPhase::Idle) {
+            rate = 1.0f;
+        }
+        anim_frac += dt * rate;
         int draw_dt = (int)anim_frac;
         if (draw_dt < 0) {
             draw_dt = 0;
@@ -878,10 +1299,11 @@ int main() {
 
         patterns[settings.pattern].draw(frame, anim_ms, draw_dt);
         rotate_view(frame);
+        translate_view(frame);
         if (!on_settings()) {
             apply_hue(frame, settings.hue);
         }
-        apply_pause_breathe(frame, now);
+        present_frame(frame, now);
         update_bgr(frame);
 
         oled_idle(now);

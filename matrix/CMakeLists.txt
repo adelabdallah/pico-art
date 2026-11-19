@@ -41,6 +41,7 @@ add_executable(matrix
     loop/loop.cpp
     rule30/rule30.cpp
     environment/environment.cpp
+    pipes/pipes.cpp
     settings/settings.cpp
     ${HUB75_DIR}/hub75.cpp
     ${HUB75_DIR}/fm6126a.cpp
