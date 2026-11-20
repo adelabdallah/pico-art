@@ -10,7 +10,8 @@ This file follows the firmware in this directory. When a pin, a pattern, or a bu
 | --- | --- | --- |
 | Raspberry Pi Pico 2W | Controller. The firmware is built for `pico2_w` and copied to the RP2350 drive. | USB for power and flashing. |
 | Waveshare P2.5 64×64 HUB75 panel | The picture. Wired the way the Waveshare Pico example is wired. | Colour on GP0 through GP5. Row address A through E on GP6 through GP10. Clock GP11, latch GP12, output enable GP13. Share ground with the Pico. Feed the panel 5 V from the supply below. |
-| Velainwom 5 V 30 A switching supply | The panel's 5 V supply. 150 W, AC 110/220 V in, DC 5 V out. | AC comes through the switch below. +V to the panel 5 V. −V to the shared ground. https://www.amazon.ca/dp/B07PRY73TN |
+| Bergen Industries PS915143 cord | Wall lead for the 5 V supply. 9 foot, 14 AWG, three wires. NEMA 5-15 plug and a pigtail. 15 A at 125 V AC, 1875 W. | Plug in the wall. The pigtail is the AC side of the supply, with the rocker in that feed. https://www.amazon.ca/dp/B07BQ8PY21 |
+| Velainwom 5 V 30 A switching supply | The panel's 5 V supply. 150 W, AC 110/220 V in, DC 5 V out. | AC comes from the cord above, through the rocker. +V to the panel 5 V. −V to the shared ground. https://www.amazon.ca/dp/B07PRY73TN |
 | DaierTek SPST rocker | On-off for the whole setup, including a later build of up to four panels. Waterproof toggle with a red safety cover. 20 A at 125 V AC, 15 A at 250 V AC. Two pins, in the AC feed of the 5 V supply. | https://www.amazon.ca/dp/B07T6YNRZS |
 | FainWan MT3608 step-up modules | 12 V for the button LEDs. A pack of five. Each takes 2 V to 24 V in and can raise it as high as 28 V, at up to 2 A. Set the output to 12 V from the panel 5 V supply. | https://www.amazon.ca/dp/B09LM83XBF |
 | 128×64 SSD1306 OLED | Names the pattern and the open setting. The top 16 rows are the yellow band. The lower rows are blue. | I2C1, GP14 SDA, GP15 SCL, address `0x3C`. |
