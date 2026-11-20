@@ -1036,6 +1036,8 @@ enum SwimMode : uint8_t {
 struct Member {
     float ox;
     float oy;
+    float vx;
+    float vy;
     float phase;
 };
 
@@ -1169,6 +1171,8 @@ static void place_members(Life &life, float spacing) {
         int row = i / cols;
         life.members[i].ox = (col - (cols - 1) * 0.5f) * spacing;
         life.members[i].oy = (row - 0.5f) * (spacing * 0.75f);
+        life.members[i].vx = 0.0f;
+        life.members[i].vy = 0.0f;
         life.members[i].phase = (rnd() % 100) * 0.07f;
     }
 }
@@ -1315,8 +1319,8 @@ static void spawn_into(Life &life, int slot) {
             count = 1;
         }
         life.count = count;
-        life.speed = 8.0f + (float)(rnd() % 6);
-        place_members(life, life.size ? 5.0f : 4.0f);
+        life.speed = 5.5f + (float)(rnd() % 3);
+        place_members(life, life.size ? 3.4f : 2.8f);
         if (!find_spot(LifeFish, false, life.x, life.y)) {
             life.x = 20.0f;
             life.y = 12.0f;
@@ -1436,6 +1440,45 @@ static void spawn_into(Life &life, int slot) {
         }
     }
     pick_heading(life);
+    if (life.kind == LifeFish) {
+        float ang = atan2f(life.vy, life.vx);
+        if (ang > 0.30f && ang < 3.1415926f - 0.30f) {
+            ang = ang < 1.5707963f ? 0.30f : 3.1415926f - 0.30f;
+        } else if (ang < -0.30f && ang > -(3.1415926f - 0.30f)) {
+            ang = ang > -1.5707963f ? -0.30f : -(3.1415926f - 0.30f);
+        }
+        if (life.x < 20.0f && cosf(ang) < 0.0f) {
+            ang = ang > 0.0f ? 3.1415926f - ang : -3.1415926f - ang;
+        } else if (life.x > (float)PANEL_WIDTH - 20.0f && cosf(ang) > 0.0f) {
+            ang = ang > 0.0f ? 3.1415926f - ang : -3.1415926f - ang;
+        }
+        if (life.y < 12.0f && sinf(ang) < 0.0f) {
+            ang = -ang;
+        } else if (life.y > 24.0f && sinf(ang) > 0.0f) {
+            ang = -ang;
+        }
+        life.vx = cosf(ang) * life.speed;
+        life.vy = sinf(ang) * life.speed;
+        if (life.vx >= 0.0f) {
+            life.face = 1;
+        } else {
+            life.face = -1;
+        }
+        for (int i = 0; i < life.count; ++i) {
+            float jx = ((int)(rnd() % 5) - 2) * 0.35f;
+            float jy = ((int)(rnd() % 5) - 2) * 0.3f;
+            float x = life.x + life.members[i].ox + jx;
+            float y = life.y + life.members[i].oy + jy;
+            if (!home_ok(LifeFish, x, y)) {
+                x = life.x;
+                y = life.y;
+            }
+            life.members[i].ox = x;
+            life.members[i].oy = y;
+            life.members[i].vx = life.vx;
+            life.members[i].vy = life.vy;
+        }
+    }
 }
 
 static bool can_step(const Life &life, float x, float y) {
@@ -1489,8 +1532,318 @@ static bool gone(const Life &life) {
     return false;
 }
 
-static void update_one(Life &life, int dt_ms) {
+// A school keeps one slow heading. Each fish eases toward that heading, the neighbours around it, and a little open water, so the group curves instead of darting.
+static void update_school(Life &life, uint32_t anim_ms, int dt_ms) {
+    float dt = dt_ms * 0.001f;
+    if (dt < 0.0f) {
+        dt = 0.0f;
+    }
+    if (life.mode != ModeLeave) {
+        life.timer_ms -= dt_ms;
+        if (life.timer_ms <= 0) {
+            begin_leave(life);
+            float mag = sqrtf(life.vx * life.vx + life.vy * life.vy);
+            if (mag > 0.01f) {
+                life.vx = life.vx / mag * life.speed;
+                life.vy = life.vy / mag * life.speed;
+            }
+        }
+    }
+
+    float school_x = life.vx;
+    float school_y = life.vy;
+    if (life.mode != ModeLeave) {
+        float ang = atan2f(life.vy, life.vx);
+        float turn = sinf(anim_ms * 0.00035f + life.phase) * 0.22f;
+        turn += sinf(anim_ms * 0.00013f + life.phase * 1.7f) * 0.10f;
+        float hx = cosf(ang);
+        float hy = sinf(ang);
+        float nose_x = life.x;
+        float nose_y = life.y;
+        float best = 0.0f;
+        int nfish = life.count;
+        if (nfish > MEMBER_CAP) {
+            nfish = MEMBER_CAP;
+        }
+        for (int i = 0; i < nfish; ++i) {
+            float proj = (life.members[i].ox - life.x) * hx + (life.members[i].oy - life.y) * hy;
+            if (proj > best) {
+                best = proj;
+                nose_x = life.members[i].ox;
+                nose_y = life.members[i].oy;
+            }
+        }
+        float look_x = nose_x + hx * 6.0f;
+        float look_y = nose_y + hy * 3.0f;
+        float ax = hx;
+        float ay = hy;
+        // The fish at the front meets the edge first, so the whole school starts its curve there.
+        if (nose_x < 16.0f && ax < 0.25f) {
+            ax = (16.0f - nose_x) * 0.08f;
+        } else if (nose_x > (float)PANEL_WIDTH - 16.0f && ax > -0.25f) {
+            ax = -((nose_x - ((float)PANEL_WIDTH - 16.0f)) * 0.08f);
+        }
+        if (nose_y < 10.0f && ay < 0.25f) {
+            ay = (10.0f - nose_y) * 0.10f;
+        } else if (nose_y > 28.0f && ay > -0.1f) {
+            ay = -((nose_y - 28.0f) * 0.10f);
+        }
+        float desired = atan2f(ay, ax);
+        float diff = desired - ang;
+        if (diff > 3.1415926f) {
+            diff -= 6.2831853f;
+        } else if (diff < -3.1415926f) {
+            diff += 6.2831853f;
+        }
+        float max_rate = 0.65f;
+        if (nose_x < 8.0f || nose_x > (float)PANEL_WIDTH - 8.0f || nose_y < 6.0f) {
+            max_rate = 1.15f;
+        }
+        if (!home_ok(LifeFish, look_x, look_y)) {
+            if (max_rate < 1.05f) {
+                max_rate = 1.05f;
+            }
+            float left = ang + 0.8f;
+            float right = ang - 0.8f;
+            bool open_left = home_ok(LifeFish, nose_x + cosf(left) * 6.0f, nose_y + sinf(left) * 4.0f);
+            bool open_right = home_ok(LifeFish, nose_x + cosf(right) * 6.0f, nose_y + sinf(right) * 4.0f);
+            if (open_left && !open_right) {
+                diff = 0.85f;
+            } else if (open_right && !open_left) {
+                diff = -0.85f;
+            }
+        }
+        float rate_ang = turn + diff;
+        if (rate_ang > max_rate) {
+            rate_ang = max_rate;
+        } else if (rate_ang < -max_rate) {
+            rate_ang = -max_rate;
+        }
+        ang += rate_ang * dt;
+        // In open water a steep dive eases back toward level. An edge turn is left alone so the curve can finish.
+        bool in_margin = nose_x < 18.0f || nose_x > (float)PANEL_WIDTH - 18.0f || nose_y < 12.0f;
+        float pitch = fabsf(ang);
+        if (pitch > 1.5707963f) {
+            pitch = 3.1415926f - pitch;
+        }
+        if (!in_margin && pitch > 0.40f) {
+            float step = 0.9f * dt;
+            if (ang > 0.0f && ang <= 1.5707963f) {
+                ang -= step;
+            } else if (ang > 1.5707963f && ang < 3.1415926f) {
+                ang += step;
+            } else if (ang < 0.0f && ang >= -1.5707963f) {
+                ang += step;
+            } else {
+                ang -= step;
+            }
+        }
+        school_x = cosf(ang) * life.speed;
+        school_y = sinf(ang) * life.speed;
+        life.vx = school_x;
+        life.vy = school_y;
+    }
+
+    float rate = 3.4f * dt;
+    if (rate > 1.0f) {
+        rate = 1.0f;
+    }
+    int count = life.count;
+    if (count > MEMBER_CAP) {
+        count = MEMBER_CAP;
+    }
+    for (int i = 0; i < count; ++i) {
+        Member &me = life.members[i];
+        float sep_x = 0.0f;
+        float sep_y = 0.0f;
+        float ali_x = 0.0f;
+        float ali_y = 0.0f;
+        float coh_x = 0.0f;
+        float coh_y = 0.0f;
+        int near = 0;
+        int crowded = 0;
+        float nearest = 99.0f;
+        for (int j = 0; j < count; ++j) {
+            if (i == j) {
+                continue;
+            }
+            float dx = life.members[j].ox - me.ox;
+            float dy = life.members[j].oy - me.oy;
+            float dist2 = dx * dx + dy * dy;
+            if (dist2 < 0.04f) {
+                sep_x += (float)(i - j);
+                crowded += 1;
+                nearest = 0.0f;
+                continue;
+            }
+            float dist = sqrtf(dist2);
+            if (dist < nearest) {
+                nearest = dist;
+            }
+            if (dist < 5.5f) {
+                float push = (5.5f - dist) / dist;
+                sep_x -= dx * push;
+                sep_y -= dy * push;
+                crowded += 1;
+            }
+            if (dist < 12.0f) {
+                ali_x += life.members[j].vx;
+                ali_y += life.members[j].vy;
+                coh_x += life.members[j].ox;
+                coh_y += life.members[j].oy;
+                near += 1;
+            }
+        }
+        float want_x = school_x;
+        float want_y = school_y;
+        if (near > 0) {
+            float inv = 1.0f / (float)near;
+            float ax = ali_x * inv;
+            float ay = ali_y * inv;
+            float am = sqrtf(ax * ax + ay * ay);
+            if (am > 0.01f) {
+                want_x += ax / am * life.speed * 0.85f;
+                want_y += ay / am * life.speed * 0.85f;
+            }
+            float cx = coh_x * inv - me.ox;
+            float cy = coh_y * inv - me.oy;
+            float cm = sqrtf(cx * cx + cy * cy);
+            if (cm > 5.0f && nearest > 3.5f) {
+                float pull = cm > 9.0f ? 1.15f : 0.35f;
+                want_x += cx / cm * life.speed * pull;
+                want_y += cy / cm * life.speed * pull;
+            }
+        }
+        if (crowded > 0) {
+            float sm = sqrtf(sep_x * sep_x + sep_y * sep_y);
+            if (sm > 0.01f) {
+                float sep_weight = nearest < 2.6f ? 4.2f : 1.6f;
+                want_x += sep_x / sm * life.speed * sep_weight;
+                want_y += sep_y / sm * life.speed * sep_weight;
+            }
+        }
+        float to_x = life.x - me.ox;
+        float to_y = life.y - me.oy;
+        float tm = sqrtf(to_x * to_x + to_y * to_y);
+        if (tm > 14.0f) {
+            want_x += to_x / tm * life.speed * 1.4f;
+            want_y += to_y / tm * life.speed * 1.4f;
+        }
+        float ahead_x = me.ox + me.vx * 0.45f;
+        float ahead_y = me.oy + me.vy * 0.45f;
+        if (life.mode != ModeLeave && !home_ok(LifeFish, ahead_x, ahead_y)) {
+            want_x += -school_y * 0.45f;
+            want_y += school_x * 0.45f;
+        }
+        float wm = sqrtf(want_x * want_x + want_y * want_y);
+        if (wm > 0.01f) {
+            want_x = want_x / wm * life.speed;
+            want_y = want_y / wm * life.speed;
+        }
+        me.vx += (want_x - me.vx) * rate;
+        me.vy += (want_y - me.vy) * rate;
+        float mm = sqrtf(me.vx * me.vx + me.vy * me.vy);
+        if (mm > 0.01f) {
+            me.vx = me.vx / mm * life.speed;
+            me.vy = me.vy / mm * life.speed;
+        }
+        float nx = me.ox + me.vx * dt;
+        float ny = me.oy + me.vy * dt;
+        if (life.mode == ModeLeave || home_ok(LifeFish, nx, ny)) {
+            me.ox = nx;
+            me.oy = ny;
+        } else if (home_ok(LifeFish, nx, me.oy)) {
+            me.ox = nx;
+            me.vy *= 0.55f;
+        } else if (home_ok(LifeFish, me.ox, ny)) {
+            me.oy = ny;
+            me.vx *= 0.55f;
+        } else {
+            float rx = me.vx * 0.86f - me.vy * 0.30f;
+            float ry = me.vy * 0.86f + me.vx * 0.30f;
+            me.vx = rx;
+            me.vy = ry;
+        }
+    }
+
+    // Nudge overlapping fish apart. Steering alone lets a turning school pile into one blob.
+    for (int i = 0; i < count; ++i) {
+        for (int j = i + 1; j < count; ++j) {
+            float dx = life.members[j].ox - life.members[i].ox;
+            float dy = life.members[j].oy - life.members[i].oy;
+            float dist2 = dx * dx + dy * dy;
+            if (dist2 >= 7.84f) {
+                continue;
+            }
+            float dist = sqrtf(dist2);
+            float gap = 2.8f - dist;
+            float ux = 1.0f;
+            float uy = 0.0f;
+            if (dist > 0.05f) {
+                ux = dx / dist;
+                uy = dy / dist;
+            } else if ((i & 1) == 0) {
+                ux = -1.0f;
+                uy = 0.35f;
+            }
+            float push = gap * (dist < 1.2f ? 0.40f : 0.18f);
+            float ix = life.members[i].ox - ux * push;
+            float iy = life.members[i].oy - uy * push;
+            float jx = life.members[j].ox + ux * push;
+            float jy = life.members[j].oy + uy * push;
+            bool leaving = life.mode == ModeLeave;
+            if (leaving || home_ok(LifeFish, ix, iy)) {
+                life.members[i].ox = ix;
+                life.members[i].oy = iy;
+            } else if (home_ok(LifeFish, ix, life.members[i].oy)) {
+                life.members[i].ox = ix;
+            } else if (home_ok(LifeFish, life.members[i].ox, iy)) {
+                life.members[i].oy = iy;
+            }
+            if (leaving || home_ok(LifeFish, jx, jy)) {
+                life.members[j].ox = jx;
+                life.members[j].oy = jy;
+            } else if (home_ok(LifeFish, jx, life.members[j].oy)) {
+                life.members[j].ox = jx;
+            } else if (home_ok(LifeFish, life.members[j].ox, jy)) {
+                life.members[j].oy = jy;
+            }
+        }
+    }
+
+    float sum_x = 0.0f;
+    float sum_y = 0.0f;
+    int visible = 0;
+    for (int i = 0; i < count; ++i) {
+        sum_x += life.members[i].ox;
+        sum_y += life.members[i].oy;
+        float x = life.members[i].ox;
+        float y = life.members[i].oy;
+        if (x > -4.0f && x < (float)PANEL_WIDTH + 4.0f && y > -4.0f && y < (float)PANEL_HEIGHT + 4.0f) {
+            visible += 1;
+        }
+    }
+    if (count > 0) {
+        life.x = sum_x / (float)count;
+        life.y = sum_y / (float)count;
+    }
+    if (life.vx > 0.4f) {
+        life.face = 1;
+    } else if (life.vx < -0.4f) {
+        life.face = -1;
+    }
+    if (life.mode == ModeLeave && visible == 0) {
+        int slot = life.slot;
+        spawn_into(life, slot);
+    }
+}
+
+static void update_one(Life &life, uint32_t anim_ms, int dt_ms) {
     if (!life.alive) {
+        return;
+    }
+    if (life.kind == LifeFish) {
+        update_school(life, anim_ms, dt_ms);
         return;
     }
     if (life.mode != ModeLeave && life.mode != ModeCross) {
@@ -1586,9 +1939,9 @@ static void init_life() {
     life_count += 1;
 }
 
-static void update_life(int dt_ms) {
+static void update_life(uint32_t anim_ms, int dt_ms) {
     for (int i = 0; i < life_count; ++i) {
-        update_one(lives[i], dt_ms);
+        update_one(lives[i], anim_ms, dt_ms);
     }
 }
 
@@ -1647,14 +2000,13 @@ static void fish_rgb(const Life &life, int along, int row, uint32_t anim_ms, int
     blue = ink.b;
 }
 
-static void draw_fish(const Life &life, float x, float y, uint32_t anim_ms) {
-    int len = life.size ? 7 : 5;
-    int face = life.face;
-    float wag = sinf(anim_ms * 0.018f + life.phase) * 0.7f;
+static void draw_fish(const Life &life, float x, float y, int face, float phase, uint32_t anim_ms) {
+    int len = life.size ? 5 : 4;
+    float wag = sinf(anim_ms * 0.012f + phase) * 0.35f;
     for (int i = 0; i < len; ++i) {
         float along = (float)i;
         float tail = 1.0f - along / (float)(len - 1);
-        float px = x + face * (along - len * 0.5f);
+        float px = x + face * (along - (len - 1) * 0.5f);
         float py = y + wag * tail;
         int red;
         int green;
@@ -1664,18 +2016,13 @@ static void draw_fish(const Life &life, float x, float y, uint32_t anim_ms) {
         if (i > 0 && i < len - 1) {
             fish_rgb(life, i, 1, anim_ms, red, green, blue);
             stamp(px, py - 1.0f, red, green, blue, false);
-            stamp(px, py + 1.0f, red, green, blue, false);
-        }
-        if (i == len / 2) {
-            stamp(px, py - 2.0f, red, green, blue, false);
         }
         if (i == 0) {
-            stamp(px - face * 0.6f, py - 1.0f, red, green, blue, false);
-            stamp(px - face * 0.6f, py + 1.0f, red, green, blue, false);
+            stamp(px - face * 0.7f, py + 0.5f, red, green, blue, false);
         }
     }
-    float hx = x + face * (len * 0.5f - 1.0f);
-    stamp(hx, y - 0.2f, 16, 16, 24, false);
+    float hx = x + face * ((len - 1) * 0.5f);
+    stamp(hx, y - 0.15f, 16, 16, 24, false);
 }
 
 static void draw_jelly(const Life &life, float x, float y, uint32_t anim_ms) {
@@ -2063,7 +2410,7 @@ static int draw_band(int kind) {
 
 static void draw_member(const Life &life, float x, float y, uint32_t anim_ms) {
     if (life.kind == LifeFish) {
-        draw_fish(life, x, y, anim_ms);
+        draw_fish(life, x, y, life.face, life.phase, anim_ms);
     } else if (life.kind == LifeJelly) {
         draw_jelly(life, x, y, anim_ms);
     } else if (life.kind == LifeOctopus) {
@@ -2105,6 +2452,14 @@ static void draw_life(uint32_t anim_ms) {
             if (count < 1) {
                 count = 1;
             }
+            if (life.kind == LifeFish) {
+                for (int m = 0; m < count; ++m) {
+                    const Member &member = life.members[m];
+                    int face = member.vx < 0.0f ? -1 : 1;
+                    draw_fish(life, member.ox, member.oy, face, member.phase, anim_ms);
+                }
+                continue;
+            }
             for (int m = 0; m < count; ++m) {
                 float x;
                 float y;
@@ -2132,7 +2487,7 @@ void reef_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     draw_places(GROWTH, (int)(sizeof GROWTH / sizeof GROWTH[0]), anim_ms);
     draw_wavers(anim_ms);
     draw_places(SHELLS, (int)(sizeof SHELLS / sizeof SHELLS[0]), anim_ms);
-    update_life(dt_ms);
+    update_life(anim_ms, dt_ms);
     draw_life(anim_ms);
     update_bubbles(dt_ms);
     sway_into(frame, anim_ms);

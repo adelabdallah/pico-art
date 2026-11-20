@@ -175,5 +175,12 @@ void pipes_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 void reef_start();
 void reef_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 
+void solar_start();
+void solar_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void solar_turn(int steps);
+void solar_red_tap();
+void solar_red_hold();
+void solar_red_release();
+
 void settings_start();
 void settings_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);

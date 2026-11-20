@@ -35,6 +35,7 @@
 // Blue GP22 shifts the hue by a fifth of a turn, and a hold spins it, except on settings.
 // On liquid, yellow starts and stops the microphone. Listening starts on. Orange still adds a diagonal there.
 // On settings, blue moves to the next value. Elsewhere blue shifts the hue. Orange and yellow stay quiet there.
+// On solar, the encoder walks from the wide view through each world and back. Red flings that world's spin, or the whole orrery on the wide view.
 // The mirrors clear on reboot.
 // Encoder A is GP16, B is GP17, and the click is GP18. Each goes to ground. Clockwise is A changing before B.
 //
@@ -150,6 +151,7 @@ Pattern patterns[] = {
     {"liquid", environment_start, environment_draw},
     {"pipes", pipes_start, pipes_draw},
     {"reef", reef_start, reef_draw},
+    {"solar", solar_start, solar_draw},
     {"settings", settings_start, settings_draw},
 };
 
@@ -413,6 +415,10 @@ static bool on_environment() {
 
 static bool on_settings() {
     return std::strcmp(patterns[settings.pattern].name, "settings") == 0;
+}
+
+static bool on_solar() {
+    return std::strcmp(patterns[settings.pattern].name, "solar") == 0;
 }
 
 static bool led_forever() {
@@ -1409,6 +1415,17 @@ static void poll_button(PanelButton &button, uint32_t now) {
         wake_matrix();
     }
     if (button.role == ButtonRole::Pause) {
+        if (on_solar() && !selecting) {
+            if (pressed) {
+                solar_red_tap();
+            }
+            if (released) {
+                solar_red_release();
+            } else if (down && (int32_t)(now - button.pressed_at) >= HOLD_MS) {
+                solar_red_hold();
+            }
+            return;
+        }
         if (pressed) {
             if (play_speed <= 0.001f) {
                 play_speed = 1.0f;
@@ -1566,6 +1583,13 @@ static void poll_encoder(uint32_t now) {
         }
         return;
     }
+    if (on_solar()) {
+        int steps = consume_nav(detents);
+        if (steps != 0) {
+            solar_turn(steps);
+        }
+        return;
+    }
     shift_v += detents * SHIFT_IMPULSE;
     if (shift_v > SHIFT_CAP) {
         shift_v = SHIFT_CAP;
@@ -1610,7 +1634,7 @@ int main() {
     oled_set_contrast(settings.oled_bright);
 
     patterns[settings.pattern].start();
-    printf("patterns: plasma, warp, feedback, metaballs, reaction, life, ant, loop, rule30, liquid, pipes, reef, settings\n");
+    printf("patterns: plasma, warp, feedback, metaballs, reaction, life, ant, loop, rule30, liquid, pipes, reef, solar, settings\n");
     show_status();
 
     uint32_t oled_at = 0;

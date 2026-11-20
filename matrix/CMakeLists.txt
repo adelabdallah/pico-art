@@ -43,6 +43,7 @@ add_executable(matrix
     environment/environment.cpp
     pipes/pipes.cpp
     reef/reef.cpp
+    solar/solar.cpp
     settings/settings.cpp
     ${HUB75_DIR}/hub75.cpp
     ${HUB75_DIR}/fm6126a.cpp
