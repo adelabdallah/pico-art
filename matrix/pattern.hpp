@@ -189,6 +189,10 @@ void solar_red_release();
 
 void campfire_start();
 void campfire_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void campfire_spark_burst();
+void campfire_shower(bool held);
+void campfire_flare_press();
+void campfire_flare_held(bool held);
 
 void skyline_start();
 void skyline_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
@@ -197,6 +201,9 @@ void skyline_move(int dx, int dy);
 void lighthouse_start();
 void lighthouse_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 void lighthouse_spin(int steps);
+void lighthouse_strike();
+void lighthouse_rain_press();
+void lighthouse_rain_held(bool held);
 
 void ferris_start();
 void ferris_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
@@ -207,10 +214,7 @@ void aurora_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 
 void fireworks_start();
 void fireworks_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
-
-void wireframe_start();
-void wireframe_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
-void wireframe_speed(int steps);
+void fireworks_launch(bool large);
 
 void galaxy_start();
 void galaxy_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);

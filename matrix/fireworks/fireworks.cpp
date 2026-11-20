@@ -2,13 +2,16 @@
 // The layout and the motion follow Fireworks at
 // https://www.ascii-magic.com/ascii/fireworks
 
+// Shells still launch on their own, at half the earlier pace.
+// Orange launches a small shell. Yellow launches a large one.
+
 #include "pattern.hpp"
 
 #include <cmath>
 
 namespace {
 
-constexpr float EVERY = 0.55f;
+constexpr float EVERY = 1.1f;
 constexpr float RISE = 1.15f;
 constexpr float FADE = 2.2f;
 constexpr float TAU = 6.2831853f;
@@ -20,6 +23,22 @@ static int star_x[40];
 static int star_y[40];
 static float star_phase[40];
 static uint32_t rng_state = 1;
+static int launch_id = 1000;
+
+struct Shell {
+    float age;
+    float bx;
+    float by;
+    float sx;
+    int hue;
+    int hue2;
+    int count;
+    float speed;
+    int id;
+    bool on;
+};
+
+static Shell launched[4];
 
 static const uint8_t HUE[HUE_COUNT][3] = {
     {255, 64, 64},
@@ -87,24 +106,50 @@ void fireworks_start() {
         star_y[i] = (int)(rnd() * 36.0f);
         star_phase[i] = rnd() * TAU;
     }
+    for (int i = 0; i < 4; ++i) {
+        launched[i].on = false;
+    }
+}
+
+void fireworks_launch(bool large) {
+    int slot = 0;
+    for (int i = 0; i < 4; ++i) {
+        if (!launched[i].on) {
+            slot = i;
+            break;
+        }
+        if (launched[i].age > launched[slot].age) {
+            slot = i;
+        }
+    }
+    Shell &shell = launched[slot];
+    shell.on = true;
+    shell.age = 0.0f;
+    shell.bx = 8.0f + rnd() * (PANEL_WIDTH - 16);
+    shell.by = large ? 3.0f + rnd() * 6.0f : 16.0f + rnd() * 10.0f;
+    shell.sx = shell.bx + (rnd() - 0.5f) * (large ? 16.0f : 6.0f);
+    shell.hue = (int)(rnd() * HUE_COUNT);
+    shell.hue2 = (int)(rnd() * HUE_COUNT);
+    if (shell.hue >= HUE_COUNT) {
+        shell.hue = HUE_COUNT - 1;
+    }
+    if (shell.hue2 >= HUE_COUNT) {
+        shell.hue2 = HUE_COUNT - 1;
+    }
+    shell.count = large ? 58 : 16;
+    shell.speed = large ? 14.0f : 5.0f;
+    shell.id = launch_id;
+    launch_id += 1;
 }
 
 void fireworks_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
-    (void)dt_ms;
     float seconds = anim_ms * 0.001f;
+    float step = dt_ms * 0.001f;
+    if (step < 0.0f) {
+        step = 0.0f;
+    }
     int newest = (int)(seconds / EVERY);
-    struct Shell {
-        float age;
-        float bx;
-        float by;
-        float sx;
-        int hue;
-        int hue2;
-        int count;
-        float speed;
-        int id;
-    };
-    Shell shells[6];
+    Shell shells[10];
     int shell_count = 0;
     for (int id = newest - 5; id <= newest; ++id) {
         float age = seconds - (float)id * EVERY;
@@ -127,6 +172,19 @@ void fireworks_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
         shell.count = 36 + (int)(hash_unit(id, 5) * 16.0f);
         shell.speed = 8.0f + hash_unit(id, 6) * 6.0f;
         shell.id = id;
+        shell.on = true;
+        shell_count += 1;
+    }
+    for (int i = 0; i < 4; ++i) {
+        if (!launched[i].on || shell_count >= 10) {
+            continue;
+        }
+        launched[i].age += step;
+        if (launched[i].age > RISE + FADE) {
+            launched[i].on = false;
+            continue;
+        }
+        shells[shell_count] = launched[i];
         shell_count += 1;
     }
     for (int y = 0; y < PANEL_HEIGHT; ++y) {

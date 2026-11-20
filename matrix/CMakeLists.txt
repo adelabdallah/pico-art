@@ -50,7 +50,6 @@ add_executable(matrix
     ferris/ferris.cpp
     aurora/aurora.cpp
     fireworks/fireworks.cpp
-    wireframe/wireframe.cpp
     galaxy/galaxy.cpp
     settings/settings.cpp
     ${HUB75_DIR}/hub75.cpp

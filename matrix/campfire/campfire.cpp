@@ -2,6 +2,8 @@
 // The layout and the motion follow Campfire Under Stars at
 // https://www.ascii-magic.com/ascii/campfire-under-stars
 
+// Orange throws a shower of sparks. Yellow flares the flame. Holding either keeps that going.
+
 #include "pattern.hpp"
 #include "noise.hpp"
 
@@ -21,13 +23,26 @@ struct Spark {
     float sway;
 };
 
+struct Burst {
+    float x;
+    float y;
+    float vx;
+    float life;
+    bool on;
+};
+
 static int tree_top[PANEL_WIDTH];
 static Spark sparks[24];
+static Burst bursts[40];
 static int star_x[70];
 static int star_y[70];
 static float star_bright[70];
 static float star_phase[70];
 static uint32_t rng_state = 1;
+static bool shower_held = false;
+static bool flare_held = false;
+static int flare_phase = 0;
+static int flare_ms = 0;
 
 static float rnd() {
     rng_state = rng_state * 1664525u + 1013904223u;
@@ -111,12 +126,15 @@ static void paint_tent(uint8_t *frame, float flick) {
     put(frame, cx, apex_y - 1, 40, 28, 24);
 }
 
-static void paint_fire(uint8_t *frame, float seconds, float flick) {
-    for (int y = FIRE_Y - 16; y <= FIRE_Y; ++y) {
-        float height = (float)(FIRE_Y - y) / 16.0f;
-        float width = (1.0f - height) * 7.0f * (0.65f + 0.35f * height) + 0.6f;
+static void paint_fire(uint8_t *frame, float seconds, float flick, float flare) {
+    int reach = 16 + (int)(flare * 8.0f);
+    float wide = 1.0f + flare * 0.5f;
+    float hot = flick * (1.0f + flare * 0.9f);
+    for (int y = FIRE_Y - reach; y <= FIRE_Y; ++y) {
+        float height = (float)(FIRE_Y - y) / (float)reach;
+        float width = ((1.0f - height) * 7.0f * (0.65f + 0.35f * height) + 0.6f) * wide;
         float lean = sinf(seconds * 3.0f + y * 0.45f) * height * 1.4f;
-        for (int x = FIRE_X - 8; x <= FIRE_X + 8; ++x) {
+        for (int x = FIRE_X - 10; x <= FIRE_X + 10; ++x) {
             float n = field_noise(x * 0.55f, y * 0.5f + seconds * 6.0f, 3);
             n = n * 0.65f + field_noise(x * 1.1f, y * 0.9f + seconds * 9.0f, 8) * 0.35f;
             float edge = 1.0f - fabsf((float)(x - FIRE_X) - lean) / width;
@@ -125,7 +143,7 @@ static void paint_fire(uint8_t *frame, float seconds, float flick) {
                 int red;
                 int green;
                 int blue;
-                fire_at(clampf(v * flick, 0.0f, 1.0f), red, green, blue);
+                fire_at(clampf(v * hot, 0.0f, 1.0f), red, green, blue);
                 put(frame, x, y, red, green, blue);
             }
         }
@@ -162,6 +180,100 @@ static void paint_sparks(uint8_t *frame, float seconds) {
     }
 }
 
+static void spawn_burst() {
+    int slot = -1;
+    for (int i = 0; i < 40; ++i) {
+        if (!bursts[i].on) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        slot = (int)(rnd() * 40.0f);
+        if (slot > 39) {
+            slot = 39;
+        }
+    }
+    Burst &burst = bursts[slot];
+    burst.on = true;
+    burst.life = 0.0f;
+    burst.x = (float)FIRE_X + (rnd() - 0.5f) * 6.0f;
+    burst.y = (float)(FIRE_Y - 8);
+    burst.vx = (rnd() - 0.5f) * 10.0f;
+}
+
+static float flare_level() {
+    if (flare_phase == 1) {
+        return flare_ms / 400.0f;
+    }
+    if (flare_phase == 2) {
+        return 1.0f;
+    }
+    if (flare_phase == 3) {
+        return 1.0f - flare_ms / 600.0f;
+    }
+    return 0.0f;
+}
+
+static void advance_flare(int dt_ms) {
+    if (dt_ms < 0) {
+        dt_ms = 0;
+    }
+    if (flare_phase == 1) {
+        flare_ms += dt_ms;
+        if (flare_ms >= 400) {
+            flare_phase = 2;
+            flare_ms = 0;
+        }
+    } else if (flare_phase == 2) {
+        if (flare_ms < 500) {
+            flare_ms += dt_ms;
+        }
+        if (flare_ms >= 500 && !flare_held) {
+            flare_phase = 3;
+            flare_ms = 0;
+        }
+    } else if (flare_phase == 3) {
+        flare_ms += dt_ms;
+        if (flare_ms >= 600) {
+            flare_phase = 0;
+            flare_ms = 0;
+        }
+    }
+}
+
+static void paint_bursts(uint8_t *frame, int dt_ms) {
+    if (shower_held) {
+        int born = dt_ms / 45;
+        if (born < 1 && dt_ms > 0) {
+            born = 1;
+        }
+        for (int i = 0; i < born; ++i) {
+            spawn_burst();
+        }
+    }
+    float step = dt_ms * 0.001f;
+    for (int i = 0; i < 40; ++i) {
+        Burst &burst = bursts[i];
+        if (!burst.on) {
+            continue;
+        }
+        burst.life += step * 0.75f;
+        burst.x += burst.vx * step;
+        burst.y -= (18.0f + (1.0f - burst.life) * 16.0f) * step;
+        burst.vx *= 0.98f;
+        if (burst.life >= 1.0f) {
+            burst.on = false;
+            continue;
+        }
+        int red;
+        int green;
+        int blue;
+        fire_at(clampf(1.0f - burst.life, 0.4f, 1.0f), red, green, blue);
+        put(frame, (int)burst.x, (int)burst.y, red, green, blue);
+    }
+}
+
 }  // namespace
 
 void campfire_start() {
@@ -183,12 +295,46 @@ void campfire_start() {
         sparks[i].offset = rnd() * 3.0f;
         sparks[i].sway = rnd();
     }
+    for (int i = 0; i < 40; ++i) {
+        bursts[i].on = false;
+    }
+    shower_held = false;
+    flare_held = false;
+    flare_phase = 0;
+    flare_ms = 0;
+}
+
+void campfire_spark_burst() {
+    for (int i = 0; i < 16; ++i) {
+        spawn_burst();
+    }
+}
+
+void campfire_shower(bool held) {
+    shower_held = held;
+}
+
+void campfire_flare_press() {
+    if (flare_phase == 3) {
+        float left = 1.0f - flare_ms / 600.0f;
+        flare_phase = 1;
+        flare_ms = (int)(left * 400.0f);
+    } else if (flare_phase == 0) {
+        flare_phase = 1;
+        flare_ms = 0;
+    }
+}
+
+void campfire_flare_held(bool held) {
+    flare_held = held;
 }
 
 void campfire_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
-    (void)dt_ms;
     float seconds = anim_ms * 0.001f;
+    advance_flare(dt_ms);
+    float flare = flare_level();
     float flick = 0.85f + 0.15f * sinf(seconds * 13.0f) * sinf(seconds * 7.3f);
+    float glow = flick * (1.0f + flare * 0.8f);
     for (int y = 0; y < HORIZON; ++y) {
         for (int x = 0; x < PANEL_WIDTH; ++x) {
             float band = (y - (x * 0.42f - 4.0f)) / 5.5f;
@@ -224,7 +370,7 @@ void campfire_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
             float dy = (float)(y - FIRE_Y) * 1.15f;
             float dist = sqrtf(dx * dx + dy * dy);
             float n = field_fbm(x * 0.18f, y * 0.4f, 2, 4);
-            float v = clampf(expf(-dist / 14.0f) * flick * 1.2f + (n - 0.5f) * 0.2f, 0.0f, 1.0f);
+            float v = clampf(expf(-dist / 14.0f) * glow * 1.2f + (n - 0.5f) * 0.2f, 0.0f, 1.0f);
             int red;
             int green;
             int blue;
@@ -232,7 +378,8 @@ void campfire_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
             put(frame, x, y, red, green, blue);
         }
     }
-    paint_tent(frame, flick);
-    paint_fire(frame, seconds, flick);
+    paint_tent(frame, glow);
+    paint_fire(frame, seconds, flick, flare);
     paint_sparks(frame, seconds);
+    paint_bursts(frame, dt_ms);
 }

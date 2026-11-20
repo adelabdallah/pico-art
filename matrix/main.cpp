@@ -39,7 +39,11 @@
 // On settings, blue moves to the next value. Elsewhere blue shifts the hue. Orange and yellow stay quiet there.
 // On solar, the encoder walks from the wide view through each world and back. Red flings that world's spin, or the whole orrery on the wide view.
 // On skyline, orange moves the view up and yellow moves it down. The encoder moves the view left and right, and the view stops at the edge of the harbour.
-// On lighthouse, ferris wheel, galaxy, and wireframe, the encoder changes how fast the beam, the wheel, the disk, and the flight move. Clockwise is faster. Rain, rim lights, stars, and the wireframe sway keep their own pace.
+// On lighthouse, ferris wheel, and galaxy, the encoder changes how fast the beam, the wheel, and the disk move. Clockwise is faster. The sea, the rim lights, and the stars keep their own pace.
+// On lighthouse, yellow strikes lightning and orange thickens the rain. The rain rises for a second, holds for a second, and falls for a second. Holding orange keeps the rain thick.
+// On campfire, orange throws sparks and yellow flares the flame. Holding either keeps that going.
+// On fireworks, orange launches a small shell and yellow a large one. Shells still launch on their own, at half the earlier pace.
+// On galaxy, tipping the panel tilts the disk. Flat and face up is the resting oval. A steeper tip draws it thinner.
 // On the wide view, tipping the panel looks around the hoops. Flat and face up is the resting view.
 // The mirrors clear on reboot.
 // Encoder A is GP16, B is GP17, and the click is GP18. Each goes to ground. Clockwise is A changing before B.
@@ -163,7 +167,6 @@ Pattern patterns[] = {
     {"ferris wheel", ferris_start, ferris_draw},
     {"aurora", aurora_start, aurora_draw},
     {"fireworks", fireworks_start, fireworks_draw},
-    {"wireframe", wireframe_start, wireframe_draw},
     {"galaxy", galaxy_start, galaxy_draw},
     {"settings", settings_start, settings_draw},
 };
@@ -175,7 +178,7 @@ constexpr uint32_t PATTERN_MAGIC = 0x6d617458;
 constexpr uint32_t PATTERN_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 
 // version 0 is a record from before the settings page. Those boots keep pattern, brightness, and hue.
-constexpr uint32_t PATTERN_VERSION = 4;
+constexpr uint32_t PATTERN_VERSION = 5;
 
 struct SavedPattern {
     uint32_t magic;
@@ -361,9 +364,14 @@ static Settings load_settings() {
         // Ant was index 6 and rule 30 was index 8. Loop was index 7 and is index 8 now.
         if (saved->index == 6 || saved->index == 8) {
             loaded.pattern = 5;
-        } else if (saved->index == 7) {
+        } else         if (saved->index == 7) {
             loaded.pattern = 8;
         }
+    }
+    // Versions 3 and 4 kept wireframe at index 19, galaxy at 20, and settings at 21.
+    // Wireframe opens galaxy. Galaxy and settings each move down by one.
+    if ((saved->version == 3 || saved->version == 4) && saved->index > 19) {
+        loaded.pattern = (int)saved->index - 1;
     }
     // Stored as percent + 1. Zero is a record from before brightness was saved.
     if (saved->brightness >= 1 && saved->brightness <= 101) {
@@ -380,7 +388,7 @@ static Settings load_settings() {
     if (saved->version == 0) {
         return loaded;
     }
-    if (saved->version != 1 && saved->version != 2 && saved->version != 3 && saved->version != PATTERN_VERSION) {
+    if (saved->version != 1 && saved->version != 2 && saved->version != 3 && saved->version != 4 && saved->version != PATTERN_VERSION) {
         return loaded;
     }
     if (saved->mic_sens <= 100 && saved->mic_sens % BRIGHTNESS_STEP == 0) {
@@ -471,8 +479,12 @@ static bool on_galaxy() {
     return std::strcmp(patterns[settings.pattern].name, "galaxy") == 0;
 }
 
-static bool on_wireframe() {
-    return std::strcmp(patterns[settings.pattern].name, "wireframe") == 0;
+static bool on_campfire() {
+    return std::strcmp(patterns[settings.pattern].name, "campfire") == 0;
+}
+
+static bool on_fireworks() {
+    return std::strcmp(patterns[settings.pattern].name, "fireworks") == 0;
 }
 
 static bool led_forever() {
@@ -1534,6 +1546,45 @@ static void poll_button(PanelButton &button, uint32_t now) {
         }
         return;
     }
+    if (on_lighthouse() && button.role == ButtonRole::Circle) {
+        if (pressed) {
+            lighthouse_strike();
+        }
+        return;
+    }
+    if (on_lighthouse() && button.role == ButtonRole::Line) {
+        if (pressed) {
+            lighthouse_rain_press();
+        }
+        lighthouse_rain_held(down);
+        return;
+    }
+    if (on_campfire() && button.role == ButtonRole::Line) {
+        if (pressed) {
+            campfire_spark_burst();
+        }
+        campfire_shower(down);
+        return;
+    }
+    if (on_campfire() && button.role == ButtonRole::Circle) {
+        if (pressed) {
+            campfire_flare_press();
+        }
+        campfire_flare_held(down);
+        return;
+    }
+    if (on_fireworks() && button.role == ButtonRole::Line) {
+        if (pressed) {
+            fireworks_launch(false);
+        }
+        return;
+    }
+    if (on_fireworks() && button.role == ButtonRole::Circle) {
+        if (pressed) {
+            fireworks_launch(true);
+        }
+        return;
+    }
     if (button.role == ButtonRole::Line || button.role == ButtonRole::Circle) {
         if (pressed && on_settings()) {
             if (button.role == ButtonRole::Line) {
@@ -1710,13 +1761,6 @@ static void poll_encoder(uint32_t now) {
         }
         return;
     }
-    if (on_wireframe()) {
-        int steps = consume_nav(detents);
-        if (steps != 0) {
-            wireframe_speed(steps);
-        }
-        return;
-    }
     shift_v += detents * SHIFT_IMPULSE;
     if (shift_v > SHIFT_CAP) {
         shift_v = SHIFT_CAP;
@@ -1761,7 +1805,7 @@ int main() {
     oled_set_contrast(settings.oled_bright);
 
     patterns[settings.pattern].start();
-    printf("patterns: plasma, warp, feedback, metaballs, reaction, life, flow field, voronoi cells, loop, liquid, pipes, reef, solar, campfire, skyline, lighthouse, ferris wheel, aurora, fireworks, wireframe, galaxy, settings\n");
+    printf("patterns: plasma, warp, feedback, metaballs, reaction, life, flow field, voronoi cells, loop, liquid, pipes, reef, solar, campfire, skyline, lighthouse, ferris wheel, aurora, fireworks, galaxy, settings\n");
     show_status();
 
     uint32_t oled_at = 0;

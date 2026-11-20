@@ -1,7 +1,8 @@
 // A lighthouse on the rocks in a storm, its beam sweeping through the rain.
 // The layout and the motion follow Lighthouse Storm at
 // https://www.ascii-magic.com/ascii/lighthouse-storm
-// The encoder speeds the beam. The sea, the rain, and the lightning keep their own pace.
+// The encoder speeds the beam. The sea and the spray keep their own pace.
+// Yellow strikes a new bolt. Orange thickens the rain, up for a second, held for a second, then down for a second. Holding orange keeps it thick.
 
 #include "pattern.hpp"
 #include "noise.hpp"
@@ -37,9 +38,14 @@ static float rock_top[PANEL_WIDTH];
 static int bolt_x[40];
 static int bolt_y[40];
 static int bolt_count = 0;
-static Drop drops[80];
+static Drop drops[120];
 static Spray spray[36];
 static uint32_t rng_state = 1;
+static int bolt_cycle = -1;
+static int strike_ms = -1;
+static bool rain_held = false;
+static int rain_phase = 0;
+static int rain_ms = 0;
 
 static float rnd() {
     rng_state = rng_state * 1664525u + 1013904223u;
@@ -61,6 +67,63 @@ static void put(uint8_t *frame, int x, int y, int red, int green, int blue) {
         return;
     }
     write_bgr(frame + (y * PANEL_WIDTH + x) * 3, clamp8(red), clamp8(green), clamp8(blue));
+}
+
+static void make_bolt() {
+    bolt_count = 0;
+    float bx = 8.0f + rnd() * 28.0f;
+    for (int y = 0; y < HORIZON && bolt_count < 40; ++y) {
+        bolt_x[bolt_count] = (int)(bx + 0.5f);
+        bolt_y[bolt_count] = y;
+        bolt_count += 1;
+        bx += (rnd() - 0.5f) * 3.2f;
+        if (bx < 2.0f) {
+            bx = 2.0f;
+        }
+        if (bx > PANEL_WIDTH - 3.0f) {
+            bx = PANEL_WIDTH - 3.0f;
+        }
+    }
+}
+
+static float rain_boost() {
+    if (rain_phase == 1) {
+        return rain_ms / 1000.0f;
+    }
+    if (rain_phase == 2) {
+        return 1.0f;
+    }
+    if (rain_phase == 3) {
+        return 1.0f - rain_ms / 1000.0f;
+    }
+    return 0.0f;
+}
+
+static void advance_rain(int dt_ms) {
+    if (dt_ms < 0) {
+        dt_ms = 0;
+    }
+    if (rain_phase == 1) {
+        rain_ms += dt_ms;
+        if (rain_ms >= 1000) {
+            rain_phase = 2;
+            rain_ms = 0;
+        }
+    } else if (rain_phase == 2) {
+        if (rain_ms < 1000) {
+            rain_ms += dt_ms;
+        }
+        if (rain_ms >= 1000 && !rain_held) {
+            rain_phase = 3;
+            rain_ms = 0;
+        }
+    } else if (rain_phase == 3) {
+        rain_ms += dt_ms;
+        if (rain_ms >= 1000) {
+            rain_phase = 0;
+            rain_ms = 0;
+        }
+    }
 }
 
 static void paint_tower(uint8_t *frame, float lamp) {
@@ -109,15 +172,13 @@ void lighthouse_start() {
             rock_top[x] = 80.0f;
         }
     }
-    bolt_count = 0;
-    float bx = 18.0f;
-    for (int y = 0; y < HORIZON && bolt_count < 40; ++y) {
-        bolt_x[bolt_count] = (int)(bx + 0.5f);
-        bolt_y[bolt_count] = y;
-        bolt_count += 1;
-        bx += (rnd() - 0.5f) * 2.4f;
-    }
-    for (int i = 0; i < 80; ++i) {
+    bolt_cycle = -1;
+    strike_ms = -1;
+    rain_held = false;
+    rain_phase = 0;
+    rain_ms = 0;
+    make_bolt();
+    for (int i = 0; i < 120; ++i) {
         drops[i].x = rnd() * PANEL_WIDTH;
         drops[i].y = rnd() * PANEL_HEIGHT;
         drops[i].speed = 28.0f + rnd() * 16.0f;
@@ -128,6 +189,25 @@ void lighthouse_start() {
         spray[i].vy = 5.0f + rnd() * 8.0f;
         spray[i].delay = rnd() * 0.6f;
     }
+}
+
+void lighthouse_strike() {
+    strike_ms = 0;
+    make_bolt();
+}
+
+void lighthouse_rain_press() {
+    if (rain_phase == 3) {
+        rain_phase = 1;
+        rain_ms = 1000 - rain_ms;
+    } else if (rain_phase == 0) {
+        rain_phase = 1;
+        rain_ms = 0;
+    }
+}
+
+void lighthouse_rain_held(bool held) {
+    rain_held = held;
 }
 
 void lighthouse_spin(int steps) {
@@ -150,8 +230,24 @@ void lighthouse_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     float dir_x = cosf(spin_angle);
     float toward = sinf(spin_angle);
     float reach = 48.0f * fabsf(dir_x);
+    advance_rain(dt_ms);
+    int cycle = (int)(seconds / 7.0f);
+    if (cycle != bolt_cycle) {
+        bolt_cycle = cycle;
+        make_bolt();
+    }
     float flash_t = fmodf(seconds, 7.0f);
     float flash = (flash_t < 0.12f || (flash_t > 0.22f && flash_t < 0.3f)) ? 1.0f : 0.0f;
+    if (strike_ms >= 0) {
+        float struck = strike_ms * 0.001f;
+        if (struck < 0.12f || (struck > 0.22f && struck < 0.3f)) {
+            flash = 1.0f;
+        }
+        strike_ms += dt_ms;
+        if (strike_ms > 320) {
+            strike_ms = -1;
+        }
+    }
 
     for (int y = 0; y < HORIZON; ++y) {
         for (int x = 0; x < PANEL_WIDTH; ++x) {
@@ -233,7 +329,8 @@ void lighthouse_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
             put(frame, x, y, foam, foam + 8, 255);
         }
     }
-    for (int i = 0; i < 80; ++i) {
+    int drop_count = 80 + (int)(40.0f * rain_boost() + 0.5f);
+    for (int i = 0; i < drop_count; ++i) {
         float y = fmodf(drops[i].y + seconds * drops[i].speed, (float)PANEL_HEIGHT + 2.0f) - 1.0f;
         float x = drops[i].x - y * 0.35f - seconds * 8.0f;
         x = fmodf(x, (float)PANEL_WIDTH);

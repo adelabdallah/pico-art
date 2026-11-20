@@ -2,6 +2,7 @@
 // The layout and the motion follow Spiral Galaxy at
 // https://www.ascii-magic.com/ascii/spiral-galaxy
 // The encoder speeds the disk. The background stars keep their own pace.
+// Tipping the panel tilts the disk. Flat and face up keeps the resting oval, and a steeper tip draws it thinner.
 
 #include "pattern.hpp"
 #include "noise.hpp"
@@ -19,6 +20,8 @@ constexpr float CY = (PANEL_HEIGHT - 1) * 0.5f;
 
 static float spin_rate = 1.0f;
 static float spin_angle = 0.0f;
+static float tilt_angle = 0.32f;
+static float tilt_squash = 0.55f;
 static int star_x[80];
 static int star_y[80];
 static float star_phase[80];
@@ -45,6 +48,8 @@ static void put(uint8_t *frame, int x, int y, int red, int green, int blue) {
 void galaxy_start() {
     spin_rate = 1.0f;
     spin_angle = 0.0f;
+    tilt_angle = 0.32f;
+    tilt_squash = 0.55f;
     rng_state = 17;
     for (int i = 0; i < 80; ++i) {
         star_x[i] = (int)(rnd() * PANEL_WIDTH);
@@ -77,8 +82,40 @@ void galaxy_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     if (spin_angle < 0.0f) {
         spin_angle += TAU;
     }
-    float tilt_c = cosf(0.32f);
-    float tilt_s = sinf(0.32f);
+    float gx = 0.0f;
+    float gy = 0.0f;
+    float gz = 0.0f;
+    float goal_angle = 0.32f;
+    float goal_squash = 0.55f;
+    if (environment_gravity(gx, gy, gz)) {
+        float horiz = sqrtf(gx * gx + gy * gy);
+        float tip = atan2f(horiz, fabsf(gz)) * environment_imu_gain();
+        if (tip > 1.25f) {
+            tip = 1.25f;
+        }
+        float amount = tip / 1.25f;
+        if (horiz > 0.12f) {
+            float heading = atan2f(gy, gx) - 1.5707963f;
+            float follow = clampf((amount - 0.04f) / 0.18f, 0.0f, 1.0f);
+            float gap = heading - 0.32f;
+            gap = gap - TAU * floorf(gap / TAU + 0.5f);
+            goal_angle = 0.32f + gap * follow;
+            goal_squash = 0.55f + (0.06f - 0.55f) * amount;
+        }
+    }
+    float blend = 0.0f;
+    if (dt_ms > 0) {
+        blend = 1.0f - expf(-dt_ms * 0.008f);
+    }
+    float turn = goal_angle - tilt_angle;
+    turn = turn - TAU * floorf(turn / TAU + 0.5f);
+    tilt_angle += turn * blend;
+    tilt_squash += (goal_squash - tilt_squash) * blend;
+    if (tilt_squash < 0.06f) {
+        tilt_squash = 0.06f;
+    }
+    float tilt_c = cosf(tilt_angle);
+    float tilt_s = sinf(tilt_angle);
     float spin_c = cosf(-spin_angle);
     float spin_s = sinf(-spin_angle);
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
@@ -86,7 +123,7 @@ void galaxy_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
             float dx = (float)x + 0.5f - CX;
             float dy = (float)y + 0.5f - CY;
             float u = dx * tilt_c + dy * tilt_s;
-            float w = (-dx * tilt_s + dy * tilt_c) / 0.55f;
+            float w = (-dx * tilt_s + dy * tilt_c) / tilt_squash;
             float rad = sqrtf(u * u + w * w) + 0.001f;
             float gu = u * spin_c - w * spin_s;
             float gw = u * spin_s + w * spin_c;
@@ -141,7 +178,7 @@ void galaxy_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
         float angle = disk_arm[i] + spin_angle;
         float u = cosf(angle) * disk_rad[i];
         float w = sinf(angle) * disk_rad[i];
-        float flat = w * 0.55f;
+        float flat = w * tilt_squash;
         int x = (int)(CX + u * tilt_c - flat * tilt_s + 0.5f);
         int y = (int)(CY + u * tilt_s + flat * tilt_c + 0.5f);
         if (sinf(seconds * 2.0f + disk_phase[i]) > -0.2f) {
