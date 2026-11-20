@@ -172,5 +172,8 @@ void environment_bands(float *out, int count);
 void pipes_start();
 void pipes_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 
+void reef_start();
+void reef_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+
 void settings_start();
 void settings_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);

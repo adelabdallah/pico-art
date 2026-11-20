@@ -149,6 +149,7 @@ Pattern patterns[] = {
     {"rule30", rule30_start, rule30_draw},
     {"liquid", environment_start, environment_draw},
     {"pipes", pipes_start, pipes_draw},
+    {"reef", reef_start, reef_draw},
     {"settings", settings_start, settings_draw},
 };
 
@@ -1609,7 +1610,7 @@ int main() {
     oled_set_contrast(settings.oled_bright);
 
     patterns[settings.pattern].start();
-    printf("patterns: plasma, warp, feedback, metaballs, reaction, life, ant, loop, rule30, liquid, pipes, settings\n");
+    printf("patterns: plasma, warp, feedback, metaballs, reaction, life, ant, loop, rule30, liquid, pipes, reef, settings\n");
     show_status();
 
     uint32_t oled_at = 0;
