@@ -9,6 +9,7 @@
 #include "pico/stdlib.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 constexpr int OLED_WIDTH = 128;
@@ -393,31 +394,41 @@ static int icon_bob(uint32_t now_ms) {
     return bob[(now_ms / 180) & 3];
 }
 
-static void draw_title(const char *text, OledIcon icon, uint32_t now_ms) {
+static void draw_title(const char *text, OledIcon icon, uint32_t now_ms, int number) {
     int x = 0;
+    int right = OLED_WIDTH;
+    if (number > 0) {
+        char digits[4];
+        snprintf(digits, sizeof digits, "%d", number);
+        int count = (int)std::strlen(digits);
+        int num_x = OLED_WIDTH - 8 * count;
+        blit_text(num_x, 0, digits, 1, 2, 0);
+        right = num_x - 4;
+    }
     if (icon != OledIcon::None) {
         uint16_t bits[16];
         paint_icon(bits, icon);
         blit_icon(0, icon_bob(now_ms), bits, (int)((now_ms / 700) & 3));
         x = 18;
     }
-    if (text == nullptr || text[0] == '\0') {
+    if (text == nullptr || text[0] == '\0' || right <= x) {
         return;
     }
     int glyphs = (int)std::strlen(text);
+    int room = right - x;
     int scale_x = 1;
     int gap = 0;
-    if (icon == OledIcon::None && glyphs > 0 && glyphs <= 8) {
+    if (icon == OledIcon::None && glyphs > 0 && glyphs * 16 <= room) {
         scale_x = 2;
     } else if (icon == OledIcon::None && glyphs > 0) {
-        int leftover = OLED_WIDTH - 8 * glyphs;
+        int leftover = room - 8 * glyphs;
         if (leftover > 0) {
             gap = leftover / glyphs;
         }
     }
     int advance = 8 * scale_x + gap;
     int width = glyphs * advance - gap;
-    int start = icon == OledIcon::None ? (OLED_WIDTH - width) / 2 : x;
+    int start = icon == OledIcon::None ? x + (room - width) / 2 : x;
     if (start < x) {
         start = x;
     }
@@ -613,13 +624,13 @@ static bool title_off(uint32_t now_ms, bool flash) {
     return ((now_ms / 280) & 1u) == 1u;
 }
 
-void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count, bool flash, const OledScene &scene) {
+void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count, bool flash, const OledScene &scene, int number) {
     if (!ready || !awake) {
         return;
     }
     std::memset(frame, 0, sizeof frame);
     if (!title_off(now_ms, flash)) {
-        draw_title(title, OledIcon::None, now_ms);
+        draw_title(title, OledIcon::None, now_ms, number);
     }
     if (bands != nullptr && band_count > 0) {
         draw_equalizer(bands, band_count, 40);
@@ -632,13 +643,13 @@ void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, i
     present();
 }
 
-void oled_show_liquid(const char *title, const char *listen, const float *bands, int band_count, uint32_t now_ms, bool flash) {
+void oled_show_liquid(const char *title, const char *listen, const float *bands, int band_count, uint32_t now_ms, bool flash, int number) {
     if (!ready || !awake) {
         return;
     }
     std::memset(frame, 0, sizeof frame);
     if (!title_off(now_ms, flash)) {
-        draw_title(title, OledIcon::None, now_ms);
+        draw_title(title, OledIcon::None, now_ms, number);
     }
     blit_text(4, 20, listen, 2, 2, 0);
     draw_equalizer(bands, band_count, 20);
@@ -651,7 +662,7 @@ void oled_show_setting(const char *label, OledIcon icon, const char *value, floa
     }
     std::memset(frame, 0, sizeof frame);
     if (!title_off(now_ms, flash)) {
-        draw_title(label, icon, now_ms);
+        draw_title(label, icon, now_ms, -1);
     }
     draw_value_bar(bar);
     blit_text(82, 24, value, 1, 3, 0);

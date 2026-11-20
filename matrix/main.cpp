@@ -18,6 +18,7 @@
 //
 // GP14 SDA and GP15 SCL drive the 128 by 64 OLED.
 // The yellow band names the pattern, or the setting while settings is open.
+// Each pattern keeps its number on the right of that band. Plasma is 1. Settings and the reset prompts have none.
 // The blue band draws slow waves that follow the mirrors, the turn, and a slide.
 // On liquid it shows the mic and an equalizer.
 // The OLED turns off after its timer. The default is 2 minutes. A button turns it back on.
@@ -642,6 +643,7 @@ static void present_oled(uint32_t now) {
         return;
     }
     char title[16];
+    int number = -1;
     if (reset_confirm) {
         format_title(title, (int)sizeof title, "ARE YOU SURE?");
     } else if (browsing && preview == RESET_SLOT) {
@@ -649,13 +651,16 @@ static void present_oled(uint32_t now) {
     } else {
         int shown = browsing ? preview : settings.pattern;
         format_title(title, (int)sizeof title, patterns[shown].name);
+        if (std::strcmp(patterns[shown].name, "settings") != 0) {
+            number = shown + 1;
+        }
     }
     if (on_environment() && !reset_confirm && (!browsing || preview == settings.pattern)) {
         char listen[8];
         float bands[8];
         snprintf(listen, sizeof listen, environment_listening() ? "MIC ON" : "MIC OFF");
         environment_bands(bands, 8);
-        oled_show_liquid(title, listen, bands, 8, now, browsing);
+        oled_show_liquid(title, listen, bands, 8, now, browsing, number);
         return;
     }
     float speed = shift_v;
@@ -667,7 +672,7 @@ static void present_oled(uint32_t now) {
     scene.circles = mirrors[settings.pattern].circles;
     scene.turn = view_angle;
     scene.slide = speed / (speed + 80.0f);
-    oled_show_pattern(title, now, nullptr, 0, browsing || reset_confirm, scene);
+    oled_show_pattern(title, now, nullptr, 0, browsing || reset_confirm, scene, number);
 }
 
 static void show_status() {

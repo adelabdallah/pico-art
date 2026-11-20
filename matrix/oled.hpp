@@ -25,11 +25,12 @@ struct OledScene {
 };
 
 // Yellow band is the name, full height. Blue band is slow waves, or an equalizer when bands is set.
+// number is the pattern's place, starting at 1 for plasma, drawn on the right. Zero and below draw no number.
 // flash blanks that name on a steady beat.
 // oled_hold_title keeps the next name lit for one beat, even in the middle of a blank.
-void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count, bool flash, const OledScene &scene);
+void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count, bool flash, const OledScene &scene, int number);
 // Liquid keeps the name in yellow. Blue shows whether the mic is on, then an equalizer.
-void oled_show_liquid(const char *title, const char *listen, const float *bands, int band_count, uint32_t now_ms, bool flash);
+void oled_show_liquid(const char *title, const char *listen, const float *bands, int band_count, uint32_t now_ms, bool flash, int number);
 // Yellow band is the setting name and a small icon. Blue band is a bar and the value.
 void oled_show_setting(const char *label, OledIcon icon, const char *value, float bar, uint32_t now_ms, bool flash);
 void oled_hold_title(uint32_t now_ms);
