@@ -597,8 +597,20 @@ static bool present() {
     return true;
 }
 
+static uint32_t title_hold = 0;
+
+void oled_hold_title(uint32_t now_ms) {
+    title_hold = now_ms;
+}
+
 static bool title_off(uint32_t now_ms, bool flash) {
-    return flash && ((now_ms / 280) & 1u) == 1u;
+    if (!flash) {
+        return false;
+    }
+    if ((int32_t)(now_ms - title_hold) < 280) {
+        return false;
+    }
+    return ((now_ms / 280) & 1u) == 1u;
 }
 
 void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count, bool flash, const OledScene &scene) {

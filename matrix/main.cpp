@@ -2,6 +2,7 @@
 //
 // Each pattern lives in its own directory and paints the same framebuffer.
 // The encoder click flashes the current name and scrolls the pattern list. A second click selects it.
+// A step shows the next name at once, even in the middle of that flash.
 // The list ends on RESET?. A click there asks ARE YOU SURE?. Another click clears every pattern's mirrors, the slide, the turn, and the hue.
 // Outside that mode, the encoder flings the picture sideways, or edits the open setting.
 // Settings is the last pattern. There, blue picks a value and the encoder raises or lowers it.
@@ -274,6 +275,7 @@ static float shift_x = 0.0f;
 static float shift_v = 0.0f;
 static bool selecting = false;
 static bool select_moved = false;
+static bool oled_now = false;
 static int preview = 0;
 static int nav_rest = 0;
 static int enc_rest = 0;
@@ -1612,6 +1614,8 @@ static void poll_encoder(uint32_t now) {
                 preview += LIST_COUNT;
             }
             select_moved = true;
+            oled_hold_title(now);
+            oled_now = true;
         }
         return;
     }
@@ -1772,9 +1776,10 @@ int main() {
 
         oled_idle(now);
         blank_matrix_if_due(now);
-        if ((int32_t)(now - oled_at) >= 0) {
+        if (oled_now || (int32_t)(now - oled_at) >= 0) {
             present_oled(now);
             oled_at = now + 150;
+            oled_now = false;
         }
 
         int spent = (int)(absolute_time_diff_us(started, get_absolute_time()) / 1000);
