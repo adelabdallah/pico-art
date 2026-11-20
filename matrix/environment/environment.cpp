@@ -17,7 +17,7 @@
 // 50 percent is the response tuned in this file.
 // Mic steps are equal ratios of loudness. Tilt steps scale how far a lean counts as poured.
 // Both stay in software, so neither setting drives the sensor harder.
-// Viscosity is a play control. 0 splashes like water. 100 creeps and barely splashes, like lava.
+// Viscosity stays at 0. The pool splashes like water.
 //
 // static below means the helper exists only in this file. The environment_* functions at the bottom are the public ones.
 
@@ -76,7 +76,6 @@ static int imu_percent = 50;
 static bool meter_peak = false;
 static bool listening = false;
 static int viscosity = 0;
-static int viscosity_step = 1;
 static bool mpu_ready = false;
 static uint32_t last_sample_ms = 0;
 static uint32_t last_onset_ms = 0;
@@ -468,21 +467,6 @@ bool environment_listening() {
     return listening;
 }
 
-int environment_viscosity() {
-    return viscosity;
-}
-
-void environment_step_viscosity() {
-    viscosity += viscosity_step;
-    if (viscosity >= 100) {
-        viscosity = 100;
-        viscosity_step = -1;
-    } else if (viscosity <= 0) {
-        viscosity = 0;
-        viscosity_step = 1;
-    }
-}
-
 void environment_toggle_listen() {
     listening = !listening;
     if (!listening) {
@@ -539,7 +523,7 @@ bool environment_axes(float &x_g, float &y_g) {
 }
 
 void environment_start() {
-    listening = false;
+    listening = true;
     meter_level = 0.0f;
     meter_peak = false;
     audio_tint = 0.0f;

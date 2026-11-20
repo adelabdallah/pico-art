@@ -159,9 +159,6 @@ void environment_start();
 void environment_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 bool environment_listening();
 void environment_toggle_listen();
-// 0 is water. 100 is lava. Each step walks one percent, up to 100, then back down to 0.
-int environment_viscosity();
-void environment_step_viscosity();
 float environment_meter();
 bool environment_meter_peak();
 // Live accelerometer X and Y in g. False when the read fails.

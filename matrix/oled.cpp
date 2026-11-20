@@ -153,7 +153,7 @@ void oled_idle(uint32_t now_ms) {
 }
 
 // 8 by 8, bit 7 on the left, drawn at double height so the yellow band is filled.
-// Order is space, A to Z, 0 to 9, colon, percent, infinity.
+// Order is space, A to Z, 0 to 9, colon, percent, infinity, question mark.
 constexpr uint8_t BIG_FONT[][8] = {
     {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
     {0x3C, 0x66, 0x66, 0x7E, 0x66, 0x66, 0x66, 0x00},
@@ -195,6 +195,7 @@ constexpr uint8_t BIG_FONT[][8] = {
     {0x00, 0x18, 0x18, 0x00, 0x18, 0x18, 0x00, 0x00},
     {0x62, 0x64, 0x08, 0x10, 0x20, 0x4C, 0x8C, 0x00},
     {0x00, 0x36, 0x49, 0x49, 0x49, 0x49, 0x36, 0x00},
+    {0x3C, 0x66, 0x06, 0x0C, 0x18, 0x00, 0x18, 0x00},
 };
 
 static int big_glyph(char code) {
@@ -218,6 +219,9 @@ static int big_glyph(char code) {
     }
     if (code == '~') {
         return 39;
+    }
+    if (code == '?') {
+        return 40;
     }
     return 0;
 }
@@ -420,20 +424,127 @@ static void draw_title(const char *text, OledIcon icon, uint32_t now_ms) {
     blit_text(start, 0, text, scale_x, 2, gap);
 }
 
-static void draw_waves(uint32_t now_ms) {
-    float phase = now_ms * 0.004f;
+static float wave_squeeze(float slide) {
+    if (slide < 0.0f) {
+        return 0.0f;
+    }
+    if (slide > 1.0f) {
+        return 1.0f;
+    }
+    return slide;
+}
+
+static float wave_y(float x, uint32_t now_ms, float squeeze, int band) {
+    float freq = 0.09f * (1.0f + squeeze * 2.2f);
+    float phase = now_ms * 0.004f * (1.0f + squeeze * 1.5f);
+    float along = x * freq + phase;
+    float amp = (3.5f + (float)band) * (1.0f + squeeze * 1.6f);
+    return 40.0f + band * 7.0f + sinf(along + band * 1.4f) * amp;
+}
+
+static void draw_waves(uint32_t now_ms, float squeeze) {
     for (int x = 0; x < OLED_WIDTH; ++x) {
-        float along = x * 0.09f + phase;
         for (int band = 0; band < 3; ++band) {
-            float wave = sinf(along + band * 1.4f) * (3.5f + band);
-            int y = (int)(40.0f + band * 7.0f + wave);
+            int y = (int)wave_y((float)x, now_ms, squeeze, band);
             set_pixel(x, y);
             set_pixel(x, y + 1);
         }
     }
 }
 
-static void draw_equalizer(const float *bands, int count) {
+static int scene_span(int index, int salt, int span) {
+    uint32_t value = (uint32_t)(index + 1) * 1664525u + (uint32_t)salt * 1013904223u;
+    value = value * 1664525u + 1013904223u;
+    if (span < 1) {
+        span = 1;
+    }
+    return (int)(value % (uint32_t)span);
+}
+
+static void draw_ring(int cx, int cy, int radius) {
+    int outer = radius * radius;
+    int inner = (radius - 1) * (radius - 1);
+    for (int y = -radius; y <= radius; ++y) {
+        for (int x = -radius; x <= radius; ++x) {
+            int dist = x * x + y * y;
+            if (dist <= outer && dist >= inner) {
+                set_pixel(cx + x, cy + y);
+            }
+        }
+    }
+}
+
+static void draw_mirror_marks(uint32_t now_ms, float squeeze, int lines, int circles) {
+    if (lines > 5) {
+        lines = 5;
+    }
+    float drift = now_ms * 0.012f;
+    drift = drift - OLED_WIDTH * floorf(drift / OLED_WIDTH);
+    for (int i = 0; i < lines; ++i) {
+        float station = (i + 0.5f) * OLED_WIDTH / (float)lines;
+        float x = station + drift;
+        if (x >= OLED_WIDTH) {
+            x -= OLED_WIDTH;
+        }
+        int y = (int)wave_y(x, now_ms, squeeze, 1);
+        for (int step = -6; step <= 6; ++step) {
+            int px = (int)x + step;
+            if (px < 0) {
+                px += OLED_WIDTH;
+            } else if (px >= OLED_WIDTH) {
+                px -= OLED_WIDTH;
+            }
+            set_pixel(px, y + step);
+        }
+    }
+    if (circles > 7) {
+        circles = 7;
+    }
+    for (int i = 0; i < circles; ++i) {
+        int cx = 10 + scene_span(i, 3, OLED_WIDTH - 20);
+        int cy = 26 + scene_span(i, 9, 28);
+        float bob = sinf(now_ms * 0.0025f + i * 1.3f) * 3.0f;
+        draw_ring(cx, cy + (int)bob, 4);
+    }
+}
+
+static bool pixel_on(const uint8_t *buf, int x, int y) {
+    if (x < 0 || x >= OLED_WIDTH || y < 0 || y >= OLED_HEIGHT) {
+        return false;
+    }
+    uint8_t bit = buf[x + (y >> 3) * OLED_WIDTH];
+    return (bit & (uint8_t)(1u << (y & 7))) != 0;
+}
+
+// Positive turn is clockwise, matching the matrix. The yellow band stays upright.
+static void rotate_blue(float angle) {
+    if (angle < 0.02f && angle > -0.02f) {
+        return;
+    }
+    static uint8_t turned[OLED_WIDTH * OLED_PAGES];
+    std::memset(turned, 0, sizeof turned);
+    float cx = (OLED_WIDTH - 1) * 0.5f;
+    float cy = (16 + OLED_HEIGHT - 1) * 0.5f;
+    float cosine = cosf(angle);
+    float sine = sinf(angle);
+    for (int y = 16; y < OLED_HEIGHT; ++y) {
+        for (int x = 0; x < OLED_WIDTH; ++x) {
+            float dx = x - cx;
+            float dy = y - cy;
+            int sx = (int)(cx + dx * cosine + dy * sine + 0.5f);
+            int sy = (int)(cy - dx * sine + dy * cosine + 0.5f);
+            if (!pixel_on(frame, sx, sy) || sy < 16) {
+                continue;
+            }
+            turned[x + (y >> 3) * OLED_WIDTH] |= (uint8_t)(1u << (y & 7));
+        }
+    }
+    for (int page = 2; page < OLED_PAGES; ++page) {
+        std::memcpy(frame + page * OLED_WIDTH, turned + page * OLED_WIDTH, OLED_WIDTH);
+    }
+}
+
+static void draw_equalizer(const float *bands, int count, int max_height) {
     if (bands == nullptr || count <= 0) {
         return;
     }
@@ -452,7 +563,7 @@ static void draw_equalizer(const float *bands, int count) {
         } else if (level > 1.0f) {
             level = 1.0f;
         }
-        int height = (int)(level * 40.0f + 0.5f);
+        int height = (int)(level * max_height + 0.5f);
         if (height < 2) {
             height = 2;
         }
@@ -490,7 +601,7 @@ static bool title_off(uint32_t now_ms, bool flash) {
     return flash && ((now_ms / 280) & 1u) == 1u;
 }
 
-void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count, bool flash) {
+void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count, bool flash, const OledScene &scene) {
     if (!ready || !awake) {
         return;
     }
@@ -499,14 +610,17 @@ void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, i
         draw_title(title, OledIcon::None, now_ms);
     }
     if (bands != nullptr && band_count > 0) {
-        draw_equalizer(bands, band_count);
+        draw_equalizer(bands, band_count, 40);
     } else {
-        draw_waves(now_ms);
+        float squeeze = wave_squeeze(scene.slide);
+        draw_waves(now_ms, squeeze);
+        draw_mirror_marks(now_ms, squeeze, scene.lines, scene.circles);
+        rotate_blue(scene.turn);
     }
     present();
 }
 
-void oled_show_liquid(const char *title, const char *listen, const char *viscosity, uint32_t now_ms, bool flash) {
+void oled_show_liquid(const char *title, const char *listen, const float *bands, int band_count, uint32_t now_ms, bool flash) {
     if (!ready || !awake) {
         return;
     }
@@ -515,7 +629,7 @@ void oled_show_liquid(const char *title, const char *listen, const char *viscosi
         draw_title(title, OledIcon::None, now_ms);
     }
     blit_text(4, 20, listen, 2, 2, 0);
-    blit_text(4, 42, viscosity, 2, 2, 0);
+    draw_equalizer(bands, band_count, 20);
     present();
 }
 

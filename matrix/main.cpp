@@ -2,10 +2,12 @@
 //
 // Each pattern lives in its own directory and paints the same framebuffer.
 // The encoder click flashes the current name and scrolls the pattern list. A second click selects it.
+// The list ends on RESET?. A click there asks ARE YOU SURE?. Another click clears every pattern's mirrors, the slide, the turn, and the hue.
 // Outside that mode, the encoder flings the picture sideways, or edits the open setting.
 // Settings is the last pattern. There, blue picks a value and the encoder raises or lowers it.
 // The pattern and the settings are stored in the last flash sector and restored on boot.
-// Pause, speed, turn, and sideways position last until power-off. Each pattern starts running at full speed.
+// Pause, speed, turn, sideways position, and each pattern's mirrors last until power-off.
+// Each pattern starts running at full speed.
 //
 // Wire the panel the way the Waveshare Pico example does.
 // GP0 R1, GP1 G1, GP2 B1, GP3 R2, GP4 G2, GP5 B2.
@@ -15,19 +17,25 @@
 //
 // GP14 SDA and GP15 SCL drive the 128 by 64 OLED.
 // The yellow band names the pattern, or the setting while settings is open.
-// The blue band draws a small version of the pattern. On liquid it shows the mic and the viscosity.
-// The OLED turns off after its timer. A button turns it back on.
+// The blue band draws slow waves that follow the mirrors, the turn, and a slide.
+// On liquid it shows the mic and an equalizer.
+// The OLED turns off after its timer. The default is 2 minutes. A button turns it back on.
 // The dimmest contrast setting is 5 percent.
 // Button C goes to the GPIO and NO goes to ground.
 // Any button, the encoder click, and a turn of the encoder wake the matrix and the OLED.
 // Red GP19 pauses. From a full stop it runs again at full speed.
-// Orange GP21 slows the picture by 5 percent. Yellow GP20 speeds it up by 5 percent. A hold keeps stepping.
+// Orange GP21 adds a diagonal mirror to the current pattern. The sixth press clears that pattern's lines.
+// Holding orange turns that new line about the centre until it is released.
+// Yellow GP20 adds a round mirror. The eighth press clears that pattern's circles.
+// Holding yellow grows that new circle up to 40 percent of the panel, then back to empty, and repeats until it is released.
+// A line runs near a corner-to-corner diagonal and misses the centre. The smaller side shows the other side reflected.
+// A new circle covers 1 to 10 percent of the panel. Its inside shows the pixels outside the rim, folded in.
 // At double speed the picture pulses, then falls off the bottom and fades back in at full speed.
 // Green GP26 turns 5 degrees clockwise. A hold spins it.
 // Blue GP22 shifts the hue by a fifth of a turn, and a hold spins it, except on settings.
-// On liquid, yellow starts and stops the microphone, and orange steps viscosity by one percent.
-// Viscosity climbs to 100, then walks back to 0. It is not saved. 100 flows like lava.
-// On settings, blue moves to the next value. Elsewhere blue shifts the hue.
+// On liquid, yellow starts and stops the microphone. Listening starts on. Orange still adds a diagonal there.
+// On settings, blue moves to the next value. Elsewhere blue shifts the hue. Orange and yellow stay quiet there.
+// The mirrors clear on reboot.
 // Encoder A is GP16, B is GP17, and the click is GP18. Each goes to ground. Clockwise is A changing before B.
 //
 // From the matrix directory, with the Pico SDK on PICO_SDK_PATH:
@@ -57,7 +65,14 @@
 constexpr int FRAME_MS = 40;
 constexpr int DT_CAP_MS = 200;
 constexpr int HOLD_MS = 320;
-constexpr int BRIGHTNESS_REPEAT_MS = 200;
+constexpr int MIRROR_LINE_CAP = 5;
+constexpr int MIRROR_CIRCLE_CAP = 7;
+constexpr float MIRROR_INSET_MIN = 4.0f;
+constexpr float MIRROR_INSET_MAX = 18.0f;
+constexpr float MIRROR_CENTRE_GAP = 6.0f;
+constexpr float MIRROR_AREA_MIN = 0.01f;
+constexpr float MIRROR_AREA_MAX = 0.10f;
+constexpr int MIRROR_LINE_TRIES = 16;
 
 constexpr int PANEL_BASIS = 8;
 constexpr int BRIGHTNESS_PERCENT = 55;
@@ -71,8 +86,6 @@ constexpr float TURN_STEP = 1.5707963f;
 constexpr float TAP_TURN = 5.0f * 0.017453292f;
 constexpr int TAP_TURN_MS = 140;
 constexpr float SPIN_PER_MS = 6.2831853f / 2000.0f;
-constexpr float SPEED_STEP = 0.05f;
-constexpr float SPEED_CAP = 3.0f;
 constexpr int OVERDRIVE_MS = 1000;
 constexpr int BURST_FALL_MS = 900;
 constexpr int BURST_FADE_MS = 700;
@@ -86,7 +99,10 @@ constexpr int LED_TIMER_COUNT = 8;
 constexpr int LED_TIMER_DEFAULT = 7;
 constexpr int OLED_MINUTES[] = {1, 2, 5, 10, 15, 30, 60};
 constexpr int OLED_TIMER_COUNT = 7;
-constexpr int OLED_TIMER_DEFAULT = 2;
+constexpr int OLED_TIMER_DEFAULT = 1;
+constexpr float LINE_TURN_PER_MS = 6.2831853f / 8000.0f;
+constexpr float CIRCLE_GROW_MS = 4000.0f;
+constexpr float CIRCLE_AREA_CAP = 0.40f;
 constexpr int SETTING_COUNT = 7;
 constexpr int OLED_BRIGHT_MIN = 5;
 constexpr int ENC_CHOICES[] = {1, 2, 4, 8};
@@ -143,7 +159,7 @@ constexpr uint32_t PATTERN_MAGIC = 0x6d617458;
 constexpr uint32_t PATTERN_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 
 // version 0 is a record from before the settings page. Those boots keep pattern, brightness, and hue.
-constexpr uint32_t PATTERN_VERSION = 1;
+constexpr uint32_t PATTERN_VERSION = 2;
 
 struct SavedPattern {
     uint32_t magic;
@@ -174,8 +190,8 @@ struct Settings {
 
 enum class ButtonRole {
     Pause,
-    Slow,
-    Fast,
+    Line,
+    Circle,
     Spin,
     Hue,
 };
@@ -204,8 +220,8 @@ struct PanelButton {
 // Each button shorts its pin to ground. The pull-up makes a press read as 0.
 static PanelButton buttons[] = {
     {PIN_RED, "red", ButtonRole::Pause, false, false, 0, 0},
-    {PIN_ORANGE, "orange", ButtonRole::Slow, false, false, 0, 0},
-    {PIN_YELLOW, "yellow", ButtonRole::Fast, false, false, 0, 0},
+    {PIN_ORANGE, "orange", ButtonRole::Line, false, false, 0, 0},
+    {PIN_YELLOW, "yellow", ButtonRole::Circle, false, false, 0, 0},
     {PIN_GREEN, "green", ButtonRole::Spin, false, false, 0, 0},
     {PIN_BLUE, "blue", ButtonRole::Hue, false, false, 0, 0},
 };
@@ -258,6 +274,43 @@ static uint32_t hue_tap_at = 0;
 static float hue_tap_from = 0.0f;
 static float hue_tap_to = 0.0f;
 
+struct MirrorLine {
+    float ax;
+    float ay;
+    float dx;
+    float dy;
+    float len2;
+    bool copy_positive;
+};
+
+struct MirrorCircle {
+    float cx;
+    float cy;
+    float radius;
+    float home_x;
+    float home_y;
+};
+
+struct PatternMirrors {
+    int lines;
+    int circles;
+    MirrorLine line[MIRROR_LINE_CAP];
+    MirrorCircle circle[MIRROR_CIRCLE_CAP];
+};
+
+static PatternMirrors mirrors[PATTERN_COUNT];
+static uint32_t mirror_state = 0;
+static int held_line_pattern = -1;
+static int held_line_index = -1;
+static int held_circle_pattern = -1;
+static int held_circle_index = -1;
+static bool line_turning = false;
+static bool circle_growing = false;
+static bool reset_confirm = false;
+
+constexpr int RESET_SLOT = PATTERN_COUNT;
+constexpr int LIST_COUNT = PATTERN_COUNT + 1;
+
 static float wrap_hue(float turns) {
     turns = turns - (float)(int)turns;
     if (turns < 0.0f) {
@@ -286,7 +339,11 @@ static Settings load_settings() {
     if (saved->hue < 1000) {
         loaded.hue = saved->hue / 1000.0f;
     }
-    if (saved->version != PATTERN_VERSION) {
+    // Version 0 predates the settings page. Later fields stay at their defaults.
+    if (saved->version == 0) {
+        return loaded;
+    }
+    if (saved->version != 1 && saved->version != PATTERN_VERSION) {
         return loaded;
     }
     if (saved->mic_sens <= 100 && saved->mic_sens % BRIGHTNESS_STEP == 0) {
@@ -303,6 +360,10 @@ static Settings load_settings() {
     }
     if (saved->oled_timer < OLED_TIMER_COUNT) {
         loaded.oled_timer = (int)saved->oled_timer;
+    }
+    // Version 1 stored the old 5 minute default at index 2. That choice becomes 2 minutes.
+    if (saved->version == 1 && loaded.oled_timer == 2) {
+        loaded.oled_timer = OLED_TIMER_DEFAULT;
     }
     if (saved->enc_sens == 1 || saved->enc_sens == 2 || saved->enc_sens == 4 || saved->enc_sens == 8) {
         loaded.enc = (int)saved->enc_sens;
@@ -529,18 +590,33 @@ static void present_oled(uint32_t now) {
         oled_show_setting(setting_rows[cursor].label, setting_rows[cursor].icon, value, bar, now, selecting);
         return;
     }
-    int shown = browsing ? preview : settings.pattern;
     char title[16];
-    format_title(title, (int)sizeof title, patterns[shown].name);
-    if (on_environment() && shown == settings.pattern) {
+    if (reset_confirm) {
+        format_title(title, (int)sizeof title, "ARE YOU SURE?");
+    } else if (browsing && preview == RESET_SLOT) {
+        format_title(title, (int)sizeof title, "RESET?");
+    } else {
+        int shown = browsing ? preview : settings.pattern;
+        format_title(title, (int)sizeof title, patterns[shown].name);
+    }
+    if (on_environment() && !reset_confirm && (!browsing || preview == settings.pattern)) {
         char listen[8];
-        char thick[8];
+        float bands[8];
         snprintf(listen, sizeof listen, environment_listening() ? "MIC ON" : "MIC OFF");
-        snprintf(thick, sizeof thick, "%d%%", environment_viscosity());
-        oled_show_liquid(title, listen, thick, now, browsing);
+        environment_bands(bands, 8);
+        oled_show_liquid(title, listen, bands, 8, now, browsing);
         return;
     }
-    oled_show_pattern(title, now, nullptr, 0, browsing);
+    float speed = shift_v;
+    if (speed < 0.0f) {
+        speed = -speed;
+    }
+    OledScene scene;
+    scene.lines = mirrors[settings.pattern].lines;
+    scene.circles = mirrors[settings.pattern].circles;
+    scene.turn = view_angle;
+    scene.slide = speed / (speed + 80.0f);
+    oled_show_pattern(title, now, nullptr, 0, browsing || reset_confirm, scene);
 }
 
 static void show_status() {
@@ -980,28 +1056,277 @@ static void translate_view(uint8_t *pixels) {
     std::memcpy(pixels, turned, sizeof turned);
 }
 
-static void step_speed(int direction, uint32_t now) {
-    if (burst != BurstPhase::Idle) {
+static uint32_t mirror_next() {
+    if (mirror_state == 0) {
+        mirror_state = time_us_32() | 1u;
+    }
+    uint32_t value = mirror_state;
+    value ^= value << 13;
+    value ^= value >> 17;
+    value ^= value << 5;
+    if (value == 0) {
+        value = 1;
+    }
+    mirror_state = value;
+    return value;
+}
+
+static float mirror_unit() {
+    return (mirror_next() >> 8) * (1.0f / 16777216.0f);
+}
+
+static float mirror_range(float low, float high) {
+    return low + (high - low) * mirror_unit();
+}
+
+static float line_centre_distance(float ax, float ay, float dx, float dy) {
+    float mid = (PANEL_WIDTH - 1) * 0.5f;
+    float len = sqrtf(dx * dx + dy * dy);
+    if (len < 1.0f) {
+        return 0.0f;
+    }
+    float cross = dx * (mid - ay) - dy * (mid - ax);
+    if (cross < 0.0f) {
+        cross = -cross;
+    }
+    return cross / len;
+}
+
+static bool smaller_side_positive(float ax, float ay, float dx, float dy) {
+    int positive = 0;
+    int negative = 0;
+    for (int y = 0; y < PANEL_HEIGHT; ++y) {
+        float y_part = dx * ((float)y - ay);
+        for (int x = 0; x < PANEL_WIDTH; ++x) {
+            float side = y_part - dy * ((float)x - ax);
+            if (side > 0.0f) {
+                positive += 1;
+            } else if (side < 0.0f) {
+                negative += 1;
+            }
+        }
+    }
+    return positive < negative;
+}
+
+static MirrorLine make_line(float ax, float ay, float bx, float by) {
+    MirrorLine line;
+    line.ax = ax;
+    line.ay = ay;
+    line.dx = bx - ax;
+    line.dy = by - ay;
+    line.len2 = line.dx * line.dx + line.dy * line.dy;
+    line.copy_positive = smaller_side_positive(ax, ay, line.dx, line.dy);
+    return line;
+}
+
+static MirrorLine random_line() {
+    MirrorLine line = {};
+    for (int attempt = 0; attempt < MIRROR_LINE_TRIES; ++attempt) {
+        bool down_right = (mirror_next() & 1u) == 0;
+        float ax;
+        float ay;
+        float bx;
+        float by;
+        if (down_right) {
+            ax = mirror_range(MIRROR_INSET_MIN, MIRROR_INSET_MAX);
+            ay = mirror_range(MIRROR_INSET_MIN, MIRROR_INSET_MAX);
+            bx = (PANEL_WIDTH - 1) - mirror_range(MIRROR_INSET_MIN, MIRROR_INSET_MAX);
+            by = (PANEL_HEIGHT - 1) - mirror_range(MIRROR_INSET_MIN, MIRROR_INSET_MAX);
+        } else {
+            ax = (PANEL_WIDTH - 1) - mirror_range(MIRROR_INSET_MIN, MIRROR_INSET_MAX);
+            ay = mirror_range(MIRROR_INSET_MIN, MIRROR_INSET_MAX);
+            bx = mirror_range(MIRROR_INSET_MIN, MIRROR_INSET_MAX);
+            by = (PANEL_HEIGHT - 1) - mirror_range(MIRROR_INSET_MIN, MIRROR_INSET_MAX);
+        }
+        line = make_line(ax, ay, bx, by);
+        if (line_centre_distance(line.ax, line.ay, line.dx, line.dy) >= MIRROR_CENTRE_GAP) {
+            return line;
+        }
+    }
+    float len = sqrtf(line.len2);
+    if (len < 1.0f) {
+        return line;
+    }
+    float gap = line_centre_distance(line.ax, line.ay, line.dx, line.dy);
+    float push = MIRROR_CENTRE_GAP - gap + 1.0f;
+    if ((mirror_next() & 1u) == 0) {
+        push = -push;
+    }
+    line.ax += (-line.dy / len) * push;
+    line.ay += (line.dx / len) * push;
+    line.copy_positive = smaller_side_positive(line.ax, line.ay, line.dx, line.dy);
+    return line;
+}
+
+static int add_line_mirror() {
+    PatternMirrors &set = mirrors[settings.pattern];
+    if (set.lines >= MIRROR_LINE_CAP) {
+        set.lines = 0;
+        return -1;
+    }
+    int index = set.lines;
+    set.line[index] = random_line();
+    set.lines += 1;
+    return index;
+}
+
+static void fit_circle(MirrorCircle &circle) {
+    circle.cx = circle.home_x;
+    circle.cy = circle.home_y;
+    float lo = circle.radius;
+    float hi = (float)(PANEL_WIDTH - 1) - circle.radius;
+    if (hi < lo) {
+        circle.cx = (PANEL_WIDTH - 1) * 0.5f;
+        circle.cy = (PANEL_HEIGHT - 1) * 0.5f;
         return;
     }
-    int steps = (int)(play_speed / SPEED_STEP + 0.5f);
-    steps += direction;
-    if (steps < 0) {
-        steps = 0;
+    if (circle.cx < lo) {
+        circle.cx = lo;
+    } else if (circle.cx > hi) {
+        circle.cx = hi;
     }
-    int cap = (int)(SPEED_CAP / SPEED_STEP + 0.5f);
-    if (steps > cap) {
-        steps = cap;
+    if (circle.cy < lo) {
+        circle.cy = lo;
+    } else if (circle.cy > hi) {
+        circle.cy = hi;
     }
-    play_speed = steps * SPEED_STEP;
-    if (play_speed >= 2.0f) {
-        if (!overdrive) {
-            overdrive = true;
-            overdrive_at = now;
+}
+
+static int add_circle_mirror() {
+    PatternMirrors &set = mirrors[settings.pattern];
+    if (set.circles >= MIRROR_CIRCLE_CAP) {
+        set.circles = 0;
+        return -1;
+    }
+    float fraction = mirror_range(MIRROR_AREA_MIN, MIRROR_AREA_MAX);
+    float radius = sqrtf(fraction * (float)PANEL_PIXELS / 3.14159265f);
+    float far = (PANEL_WIDTH - 1) - radius;
+    MirrorCircle circle = {};
+    circle.home_x = mirror_range(radius, far);
+    circle.home_y = mirror_range(radius, far);
+    circle.radius = radius;
+    fit_circle(circle);
+    int index = set.circles;
+    set.circle[index] = circle;
+    set.circles += 1;
+    return index;
+}
+
+static void spin_line(MirrorLine &line, float angle) {
+    float mid = (PANEL_WIDTH - 1) * 0.5f;
+    float cosine = cosf(angle);
+    float sine = sinf(angle);
+    float bx = line.ax + line.dx;
+    float by = line.ay + line.dy;
+    float ax = mid + (line.ax - mid) * cosine - (line.ay - mid) * sine;
+    float ay = mid + (line.ax - mid) * sine + (line.ay - mid) * cosine;
+    float nbx = mid + (bx - mid) * cosine - (by - mid) * sine;
+    float nby = mid + (bx - mid) * sine + (by - mid) * cosine;
+    line = make_line(ax, ay, nbx, nby);
+}
+
+static void grow_circle(MirrorCircle &circle, int dt_ms) {
+    float area = circle.radius * circle.radius * 3.14159265f / (float)PANEL_PIXELS;
+    area += CIRCLE_AREA_CAP * (float)dt_ms / CIRCLE_GROW_MS;
+    if (area >= CIRCLE_AREA_CAP) {
+        area = 0.0f;
+    }
+    circle.radius = sqrtf(area * (float)PANEL_PIXELS / 3.14159265f);
+    fit_circle(circle);
+}
+
+static void update_mirror_motion(int dt_ms) {
+    if (line_turning && held_line_pattern >= 0 && held_line_pattern < PATTERN_COUNT) {
+        PatternMirrors &set = mirrors[held_line_pattern];
+        if (held_line_index >= 0 && held_line_index < set.lines) {
+            spin_line(set.line[held_line_index], LINE_TURN_PER_MS * dt_ms);
+        } else {
+            line_turning = false;
         }
-    } else {
-        overdrive = false;
     }
+    if (circle_growing && held_circle_pattern >= 0 && held_circle_pattern < PATTERN_COUNT) {
+        PatternMirrors &set = mirrors[held_circle_pattern];
+        if (held_circle_index >= 0 && held_circle_index < set.circles) {
+            grow_circle(set.circle[held_circle_index], dt_ms);
+        } else {
+            circle_growing = false;
+        }
+    }
+}
+
+static void clear_view() {
+    for (int i = 0; i < PATTERN_COUNT; ++i) {
+        mirrors[i].lines = 0;
+        mirrors[i].circles = 0;
+    }
+    line_turning = false;
+    circle_growing = false;
+    held_line_index = -1;
+    held_circle_index = -1;
+    shift_x = 0.0f;
+    shift_v = 0.0f;
+    view_angle = 0.0f;
+    view_target = 0.0f;
+    view_spinning = false;
+    hue_spin = false;
+    hue_tap = false;
+    settings.hue = 0.0f;
+    save_settings(settings);
+}
+
+static void reflect_line(const MirrorLine &line, float &x, float &y) {
+    if (line.len2 < 1.0f) {
+        return;
+    }
+    float side = line.dx * (y - line.ay) - line.dy * (x - line.ax);
+    bool copy = line.copy_positive ? side > 0.0f : side < 0.0f;
+    if (!copy) {
+        return;
+    }
+    float vx = x - line.ax;
+    float vy = y - line.ay;
+    float t = (vx * line.dx + vy * line.dy) / line.len2;
+    float near_x = line.ax + t * line.dx;
+    float near_y = line.ay + t * line.dy;
+    x = near_x + near_x - x;
+    y = near_y + near_y - y;
+}
+
+static void reflect_circle(const MirrorCircle &circle, float &x, float &y) {
+    float dx = x - circle.cx;
+    float dy = y - circle.cy;
+    float dist2 = dx * dx + dy * dy;
+    float radius2 = circle.radius * circle.radius;
+    if (dist2 >= radius2 || dist2 < 0.01f) {
+        return;
+    }
+    float dist = sqrtf(dist2);
+    float scale = (circle.radius + circle.radius - dist) / dist;
+    x = circle.cx + dx * scale;
+    y = circle.cy + dy * scale;
+}
+
+// The turn and the slide run first, so the pattern moves through mirrors that stay put.
+static void apply_mirrors(uint8_t *pixels) {
+    const PatternMirrors &set = mirrors[settings.pattern];
+    if (set.lines == 0 && set.circles == 0) {
+        return;
+    }
+    for (int y = 0; y < PANEL_HEIGHT; ++y) {
+        for (int x = 0; x < PANEL_WIDTH; ++x) {
+            float sx = (float)x;
+            float sy = (float)y;
+            for (int i = set.circles - 1; i >= 0; --i) {
+                reflect_circle(set.circle[i], sx, sy);
+            }
+            for (int i = set.lines - 1; i >= 0; --i) {
+                reflect_line(set.line[i], sx, sy);
+            }
+            sample_plane(pixels, sx, sy, turned + (y * PANEL_WIDTH + x) * 3, false, false);
+        }
+    }
+    std::memcpy(pixels, turned, sizeof turned);
 }
 
 static void enc_isr(uint gpio, uint32_t events) {
@@ -1094,30 +1419,45 @@ static void poll_button(PanelButton &button, uint32_t now) {
         }
         return;
     }
-    if (on_environment() && button.role == ButtonRole::Fast) {
+    if (on_environment() && button.role == ButtonRole::Circle) {
         if (pressed) {
             environment_toggle_listen();
             show_status();
         }
         return;
     }
-    if (on_environment() && button.role == ButtonRole::Slow) {
-        if (pressed || (down && (int32_t)(now - button.repeat_at) >= 0)) {
-            environment_step_viscosity();
-            button.repeat_at = now + (pressed ? HOLD_MS : BRIGHTNESS_REPEAT_MS);
-            if (pressed) {
-                show_status();
+    if (button.role == ButtonRole::Line || button.role == ButtonRole::Circle) {
+        if (pressed && on_settings()) {
+            if (button.role == ButtonRole::Line) {
+                line_turning = false;
+                held_line_index = -1;
+            } else {
+                circle_growing = false;
+                held_circle_index = -1;
             }
+        } else if (pressed) {
+            if (button.role == ButtonRole::Line) {
+                line_turning = false;
+                held_line_pattern = settings.pattern;
+                held_line_index = add_line_mirror();
+            } else {
+                circle_growing = false;
+                held_circle_pattern = settings.pattern;
+                held_circle_index = add_circle_mirror();
+            }
+            show_status();
         }
-        return;
-    }
-    if (button.role == ButtonRole::Slow || button.role == ButtonRole::Fast) {
-        int direction = button.role == ButtonRole::Fast ? 1 : -1;
-        if (pressed || (down && (int32_t)(now - button.repeat_at) >= 0)) {
-            step_speed(direction, now);
-            button.repeat_at = now + (pressed ? HOLD_MS : BRIGHTNESS_REPEAT_MS);
-            if (pressed) {
-                show_status();
+        if (released) {
+            if (button.role == ButtonRole::Line) {
+                line_turning = false;
+            } else {
+                circle_growing = false;
+            }
+        } else if (down && (int32_t)(now - button.pressed_at) >= HOLD_MS) {
+            if (button.role == ButtonRole::Line && held_line_index >= 0) {
+                line_turning = true;
+            } else if (button.role == ButtonRole::Circle && held_circle_index >= 0) {
+                circle_growing = true;
             }
         }
         return;
@@ -1164,9 +1504,19 @@ static void poll_encoder(uint32_t now) {
         wake_matrix();
         if (!selecting) {
             selecting = true;
+            reset_confirm = false;
             preview = settings.pattern;
             select_moved = false;
             nav_rest = 0;
+        } else if (reset_confirm) {
+            selecting = false;
+            reset_confirm = false;
+            nav_rest = 0;
+            clear_view();
+            show_status();
+        } else if (preview == RESET_SLOT) {
+            reset_confirm = true;
+            show_status();
         } else {
             selecting = false;
             nav_rest = 0;
@@ -1186,10 +1536,11 @@ static void poll_encoder(uint32_t now) {
     if (selecting) {
         int steps = consume_nav(detents);
         if (steps != 0) {
+            reset_confirm = false;
             preview += steps;
-            preview %= PATTERN_COUNT;
+            preview %= LIST_COUNT;
             if (preview < 0) {
-                preview += PATTERN_COUNT;
+                preview += LIST_COUNT;
             }
             select_moved = true;
         }
@@ -1285,6 +1636,7 @@ int main() {
         update_motion(now);
         update_turn(dt);
         update_shift(dt);
+        update_mirror_motion(dt);
         float rate = motion * play_speed;
         if (burst != BurstPhase::Idle) {
             rate = 1.0f;
@@ -1301,6 +1653,7 @@ int main() {
         rotate_view(frame);
         translate_view(frame);
         if (!on_settings()) {
+            apply_mirrors(frame);
             apply_hue(frame, settings.hue);
         }
         present_frame(frame, now);

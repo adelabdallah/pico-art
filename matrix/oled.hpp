@@ -15,10 +15,19 @@ void oled_set_idle_ms(uint32_t idle_ms);
 void oled_set_contrast(int percent);
 void oled_poke(uint32_t now_ms);
 void oled_idle(uint32_t now_ms);
+// Counts and motion for the blue wave picture. turn is clockwise radians.
+// slide is 0 at rest and rises while the picture is flinging sideways.
+struct OledScene {
+    int lines;
+    int circles;
+    float turn;
+    float slide;
+};
+
 // Yellow band is the name, full height. Blue band is slow waves, or an equalizer when bands is set.
 // flash blanks that name on a steady beat.
-void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count, bool flash);
-// Liquid keeps the name in yellow. Blue shows whether the mic is on, then the viscosity percent.
-void oled_show_liquid(const char *title, const char *listen, const char *viscosity, uint32_t now_ms, bool flash);
+void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count, bool flash, const OledScene &scene);
+// Liquid keeps the name in yellow. Blue shows whether the mic is on, then an equalizer.
+void oled_show_liquid(const char *title, const char *listen, const float *bands, int band_count, uint32_t now_ms, bool flash);
 // Yellow band is the setting name and a small icon. Blue band is a bar and the value.
 void oled_show_setting(const char *label, OledIcon icon, const char *value, float bar, uint32_t now_ms, bool flash);
