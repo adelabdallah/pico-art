@@ -163,6 +163,11 @@ float environment_meter();
 bool environment_meter_peak();
 // Live accelerometer X and Y in g. False when the read fails.
 bool environment_axes(float &x_g, float &y_g);
+// Panel gravity in g. X and Y match the liquid cup. Z is out of the panel.
+// Wakes the accelerometer on the first call. False when the read fails.
+bool environment_gravity(float &x_g, float &y_g, float &z_g);
+// 50 percent is a gain of one. 0 holds the view still.
+float environment_imu_gain();
 // percent is 0 to 100. 50 matches the tuned liquid response.
 void environment_set_mic_sens(int percent);
 void environment_set_imu_sens(int percent);

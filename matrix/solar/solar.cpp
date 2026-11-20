@@ -1,12 +1,16 @@
 // An orrery on the wide view, and a close portrait of each world.
+// Each orbit is its own hoop, leaned so the paths cross in front of and behind each other.
+// Tipping the panel looks around that model. Flat, face up, is the resting view.
 // The encoder walks the stops. Red flings the portrait's spin, or the whole orrery on the wide view.
 // Orbit spacing is even so the rings stay apart. Periods follow the real order, with the outer worlds compressed into a few minutes.
-// Each portrait carries one landmark large enough to name the body on a 64 by 64 panel.
+// Each portrait keeps one landmark large enough to name the body, and smaller marks around it.
+// The sun's corona carries streamers, and flares that rise and fade at new angles around the limb.
 
 #include "pattern.hpp"
 
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 
 namespace {
@@ -30,7 +34,7 @@ constexpr float TWO_PI = 6.2831853f;
 constexpr float HALF_PI = 1.5707963f;
 constexpr float CX = (PANEL_WIDTH - 1) * 0.5f;
 constexpr float CY = (PANEL_HEIGHT - 1) * 0.5f;
-constexpr float SQUASH = 0.70f;
+constexpr float CAM_PITCH = 0.95f;
 constexpr float PORTRAIT_R = 13.0f;
 constexpr float SPRING_K = 80.0f;
 constexpr float SPRING_D = 11.0f;
@@ -46,6 +50,27 @@ constexpr int ROCKS = 12;
 // Semi-major axis in pixels. The sun sits at the centre. Pluto's ring clips the side edges.
 constexpr float ORBIT_R[STOP_COUNT] = {
     0.0f, 0.0f, 6.0f, 9.2f, 12.4f, 15.6f, 18.8f, 22.0f, 25.2f, 28.4f, 31.6f, 34.8f,
+};
+
+// Leans are wide enough that each hoop clears its neighbours on this panel. The inner ones stay shallow.
+struct Hoop {
+    float incl;
+    float node;
+};
+
+constexpr Hoop HOOP[STOP_COUNT] = {
+    {0.0f, 0.0f},
+    {0.0f, 0.0f},
+    {0.22f, 0.50f},
+    {0.16f, 2.10f},
+    {0.10f, 3.40f},
+    {0.26f, 1.10f},
+    {0.30f, 0.20f},
+    {0.34f, 2.40f},
+    {0.40f, 4.30f},
+    {0.46f, 0.80f},
+    {0.50f, 3.60f},
+    {0.55f, 1.50f},
 };
 
 // Inner worlds keep their real ratios with Earth at 60 seconds. Outer worlds are squeezed onto 5 to 10 minutes.
@@ -174,6 +199,24 @@ constexpr Oval CRATERS[] = {
     {0.62f, -0.42f, 0.20f, 0.18f},
     {-0.15f, 0.62f, 0.16f, 0.16f},
     {1.70f, 0.10f, 0.28f, 0.26f},
+    {0.05f, -0.08f, 0.13f, 0.12f},
+    {-0.72f, 0.28f, 0.15f, 0.14f},
+    {0.95f, 0.12f, 0.12f, 0.11f},
+    {-0.28f, -0.55f, 0.14f, 0.13f},
+};
+
+constexpr int CRATER_COUNT = (int)(sizeof CRATERS / sizeof CRATERS[0]);
+
+// A flare is one coronal event. When it fades, the next one chooses a new angle on the limb.
+constexpr int FLARE_COUNT = 5;
+
+struct Flare {
+    float angle;
+    float length;
+    float age;
+    float life;
+    float wait;
+    int kind;
 };
 
 constexpr Oval SUNSPOTS[] = {
@@ -198,6 +241,9 @@ static float belt_anchor = 0.8f;
 static float belt_dot[BELT_DOTS];
 static float belt_period[BELT_DOTS];
 static float belt_jitter[BELT_DOTS];
+static float belt_lift[BELT_DOTS];
+static float cam_pitch = CAM_PITCH;
+static float cam_yaw = 0.0f;
 static float rock_x[ROCKS];
 static float rock_y[ROCKS];
 static float rock_speed[ROCKS];
@@ -205,6 +251,10 @@ static float rock_depth[ROCKS];
 static float rock_rad[ROCKS];
 static int rock_crater[ROCKS];
 static float moon_angle[MOON_COUNT];
+static Flare flares[FLARE_COUNT];
+static float corona_time = 0.0f;
+static float cloud_time = 0.0f;
+static uint32_t flare_salt = 0x51u;
 
 static uint32_t mix(uint32_t n) {
     n ^= n << 13;
@@ -291,23 +341,16 @@ static bool on_land(float lon, float lat, int &col) {
     return EARTH_ROWS[row][col] == '#';
 }
 
-static bool earth_cloud(float lon, float lat) {
-    constexpr float fleck[][3] = {
-        {5.60f, 0.45f, 0.15f},
-        {3.60f, -0.35f, 0.14f},
-        {3.30f, 0.70f, 0.13f},
-        {1.30f, -0.25f, 0.14f},
-        {4.20f, -0.55f, 0.12f},
-    };
-    for (int i = 0; i < 5; ++i) {
-        float dx = wrap_pi(lon - fleck[i][0]);
-        float dy = lat - fleck[i][1];
-        float reach = fleck[i][2];
-        if (dx * dx + dy * dy < reach * reach) {
-            return true;
-        }
-    }
-    return false;
+// The masses drift across the surface and slowly change shape.
+static float earth_clouds(float lon, float lat) {
+    float t = cloud_time;
+    float x = lon + t * 0.28f;
+    float y = lat + sinf(t * 0.05f) * 0.18f;
+    float a = sinf(x * 1.7f + 0.6f) * sinf(y * 2.4f + t * 0.07f);
+    float b = sinf(x * 3.3f - y * 1.8f + t * 0.15f);
+    float c = sinf(x * 5.1f + y * 3.7f - t * 0.11f);
+    float field = a * 0.46f + b * 0.34f + c * 0.28f;
+    return smooth_unit(0.22f, 0.70f, field);
 }
 
 static void colour_earth(float lon, float lat, int &red, int &green, int &blue) {
@@ -329,14 +372,16 @@ static void colour_earth(float lon, float lat, int &red, int &green, int &blue) 
             blue = 52;
         }
     } else {
-        red = 16;
-        green = 54;
-        blue = 176;
+        float gyre = 0.5f + 0.5f * sinf(lon * 2.0f + lat * 3.0f);
+        red = 14;
+        green = clamp_channel(36 + gyre * 28);
+        blue = clamp_channel(148 + gyre * 48);
     }
-    if (earth_cloud(lon, lat)) {
-        red = 226;
-        green = 232;
-        blue = 238;
+    float clouds = earth_clouds(lon, lat);
+    if (clouds > 0.0f) {
+        red = (int)(red + (232 - red) * clouds);
+        green = (int)(green + (238 - green) * clouds);
+        blue = (int)(blue + (244 - blue) * clouds);
     }
 }
 
@@ -347,6 +392,11 @@ static void colour_sun(float lon, float lat, float nz, int &red, int &green, int
     red = clamp_channel((220.0f + warm * 35.0f) * glow);
     green = clamp_channel((120.0f + warm * 110.0f) * glow);
     blue = clamp_channel((24.0f + warm * 50.0f) * glow);
+    if (in_oval(lon, lat, 0.62f, 0.32f, 0.22f, 0.16f) || in_oval(lon, lat, -1.15f, -0.02f, 0.20f, 0.15f)) {
+        red = clamp_channel(255 * glow);
+        green = clamp_channel(236 * glow);
+        blue = clamp_channel(150 * glow);
+    }
     for (int i = 0; i < 4; ++i) {
         const Oval &spot = SUNSPOTS[i];
         if (in_oval(lon, lat, spot.lon, spot.lat, spot.rx, spot.ry)) {
@@ -361,7 +411,12 @@ static void colour_mercury(float lon, float lat, int &red, int &green, int &blue
     red = 156;
     green = 150;
     blue = 144;
-    for (int i = 0; i < 5; ++i) {
+    if (in_oval(lon, lat, 0.05f, -0.02f, 0.90f, 0.48f)) {
+        red = 128;
+        green = 122;
+        blue = 116;
+    }
+    for (int i = 0; i < CRATER_COUNT; ++i) {
         const Oval &crater = CRATERS[i];
         float dx = wrap_pi(lon - crater.lon) / crater.rx;
         float dy = (lat - crater.lat) / crater.ry;
@@ -375,69 +430,113 @@ static void colour_mercury(float lon, float lat, int &red, int &green, int &blue
 }
 
 static void colour_venus(float lon, float lat, int &red, int &green, int &blue) {
-    float band = sinf(lat * 5.0f + sinf(lon * 2.0f) * 0.7f);
+    float band = sinf(lat * 6.0f + sinf(lon * 2.2f) * 0.55f);
     float lift = 0.5f + 0.5f * band;
-    red = clamp_channel(168 + lift * 80);
-    green = clamp_channel(104 + lift * 110);
-    blue = clamp_channel(32 + lift * 48);
+    red = clamp_channel(160 + lift * 86);
+    green = clamp_channel(96 + lift * 118);
+    blue = clamp_channel(28 + lift * 52);
+    float dx = wrap_pi(lon - 0.15f);
+    bool stem = dx > -0.12f && dx < 1.05f && fabsf(lat) < 0.18f;
+    bool arm = false;
+    if (dx > -1.15f && dx < 0.15f) {
+        float fork = 0.75f * (-dx);
+        arm = fabsf(fabsf(lat) - fork) < 0.16f;
+    }
+    if (stem || arm) {
+        red = 248;
+        green = 216;
+        blue = 126;
+    }
+    float hood = smooth_unit(1.02f, 1.38f, fabsf(lat));
+    red = (int)(red + (246 - red) * hood);
+    green = (int)(green + (230 - green) * hood);
+    blue = (int)(blue + (176 - blue) * hood);
 }
 
 static void colour_mars(float lon, float lat, int &red, int &green, int &blue) {
-    red = 198;
-    green = 74;
-    blue = 36;
-    if (in_oval(lon, lat, 0.45f, 0.15f, 0.55f, 0.32f)) {
-        red = 112;
-        green = 42;
-        blue = 28;
+    float dust = 0.5f + 0.5f * sinf(lon * 3.0f) * sinf(lat * 2.0f);
+    red = clamp_channel(176 + dust * 50);
+    green = clamp_channel(62 + dust * 30);
+    blue = clamp_channel(28 + dust * 16);
+    if (in_oval(lon, lat, 0.35f, 0.18f, 0.48f, 0.28f) || in_oval(lon, lat, -0.95f, -0.22f, 0.34f, 0.22f)) {
+        red = 102;
+        green = 38;
+        blue = 26;
+    }
+    float canyon = wrap_pi(lon);
+    if (fabsf(lat + 0.06f) < 0.14f && canyon > -0.35f && canyon < 1.20f) {
+        red = 78;
+        green = 30;
+        blue = 20;
+    }
+    if (in_oval(lon, lat, 1.35f, -0.40f, 0.30f, 0.20f)) {
+        red = 232;
+        green = 178;
+        blue = 132;
     }
 }
 
-static void colour_bands(float lon, float lat, const int bands[5][3], int &red, int &green, int &blue) {
+static void colour_bands(float lon, float lat, const int bands[][3], int count, int &red, int &green, int &blue) {
     float u = (lat + HALF_PI) / PI;
-    int band = (int)(u * 5.0f);
+    int band = (int)(u * (float)count);
     if (band < 0) {
         band = 0;
     }
-    if (band > 4) {
-        band = 4;
+    if (band >= count) {
+        band = count - 1;
     }
-    float ripple = 0.92f + 0.08f * sinf(lon * 3.0f + band);
+    float ripple = 0.86f + 0.14f * sinf(lon * 5.0f + (float)band);
     red = clamp_channel(bands[band][0] * ripple);
     green = clamp_channel(bands[band][1] * ripple);
     blue = clamp_channel(bands[band][2] * ripple);
 }
 
 static void colour_jupiter(float lon, float lat, int &red, int &green, int &blue) {
-    constexpr int bands[5][3] = {
-        {176, 96, 40},
-        {236, 208, 158},
-        {168, 84, 34},
-        {244, 216, 172},
-        {186, 104, 46},
+    constexpr int bands[9][3] = {
+        {150, 78, 32},
+        {232, 206, 156},
+        {158, 70, 28},
+        {246, 220, 176},
+        {140, 62, 24},
+        {238, 214, 168},
+        {172, 88, 36},
+        {226, 198, 148},
+        {154, 80, 34},
     };
-    colour_bands(lon, lat, bands, red, green, blue);
-    // About 5 px wide, inside the southern cream band.
-    if (in_oval(lon, lat, 0.15f, -0.62f, 0.46f, 0.15f)) {
+    colour_bands(lon, lat, bands, 9, red, green, blue);
+    // Sits inside one southern cream band.
+    if (in_oval(lon, lat, 0.20f, -0.35f, 0.40f, 0.13f)) {
         red = 214;
         green = 62;
         blue = 40;
     }
+    if (in_oval(lon, lat, -0.85f, 0.35f, 0.16f, 0.10f)) {
+        red = 252;
+        green = 248;
+        blue = 236;
+    }
 }
 
 static void colour_saturn(float lon, float lat, int &red, int &green, int &blue) {
-    constexpr int bands[5][3] = {
-        {196, 164, 108},
-        {228, 204, 150},
-        {186, 154, 98},
+    constexpr int bands[7][3] = {
+        {188, 156, 100},
+        {230, 206, 152},
+        {176, 146, 92},
         {236, 214, 164},
-        {204, 174, 118},
+        {168, 138, 86},
+        {224, 200, 146},
+        {198, 168, 112},
     };
-    colour_bands(lon, lat, bands, red, green, blue);
-    if (in_oval(lon, lat, 0.4f, 0.32f, 0.22f, 0.10f)) {
-        red = 244;
-        green = 228;
-        blue = 186;
+    colour_bands(lon, lat, bands, 7, red, green, blue);
+    if (in_oval(lon, lat, 0.40f, 0.28f, 0.24f, 0.11f)) {
+        red = 248;
+        green = 232;
+        blue = 190;
+    }
+    if (in_oval(lon, lat, -1.10f, -0.22f, 0.18f, 0.09f)) {
+        red = 150;
+        green = 118;
+        blue = 72;
     }
 }
 
@@ -467,6 +566,11 @@ static void colour_uranus(float nx, float ny, float nz, float spin, int &red, in
         green = clamp_channel(green + 24);
         blue = clamp_channel(blue + 22);
     }
+    if (fabsf(wrap_pi(lon - 1.15f)) < 0.32f && fabsf(pole - 0.02f) < 0.18f) {
+        red = clamp_channel(red + 40);
+        green = clamp_channel(green + 32);
+        blue = clamp_channel(blue + 28);
+    }
     red = (int)(red + (232 - red) * hood);
     green = (int)(green + (248 - green) * hood);
     blue = (int)(blue + (244 - blue) * hood);
@@ -474,19 +578,26 @@ static void colour_uranus(float nx, float ny, float nz, float spin, int &red, in
 }
 
 static void colour_neptune(float lon, float lat, int &red, int &green, int &blue) {
-    red = 24;
-    green = 58;
-    blue = 196;
-    if (in_oval(lon, lat, 0.25f, 0.12f, 0.30f, 0.16f)) {
+    float zone = 1.0f - smooth_unit(0.10f, 0.70f, fabsf(lat));
+    red = clamp_channel(18 + zone * 16);
+    green = clamp_channel(48 + zone * 40);
+    blue = clamp_channel(168 + zone * 48);
+    if (in_oval(lon, lat, 0.25f, 0.12f, 0.30f, 0.16f) || in_oval(lon, lat, -1.15f, -0.28f, 0.16f, 0.11f)) {
         red = 10;
         green = 22;
         blue = 78;
     }
     float dx = wrap_pi(lon - 1.1f);
-    if (fabsf(dx) < 0.55f && fabsf(lat - 0.48f) < 0.07f) {
+    if (fabsf(dx) < 0.55f && fabsf(lat - 0.48f) < 0.10f) {
         red = 226;
         green = 236;
         blue = 248;
+    }
+    float dx2 = wrap_pi(lon + 0.4f);
+    if (fabsf(dx2) < 0.40f && fabsf(lat + 0.15f) < 0.09f) {
+        red = 210;
+        green = 226;
+        blue = 244;
     }
 }
 
@@ -514,13 +625,24 @@ static bool pluto_heart(float lon, float lat) {
 
 static void colour_pluto(float lon, float lat, int &red, int &green, int &blue) {
     float mottled = sinf(lon * 5.0f) * sinf(lat * 4.0f);
-    red = clamp_channel(108 + mottled * 16);
-    green = clamp_channel(78 + mottled * 10);
-    blue = clamp_channel(62 + mottled * 8);
-    if (pluto_heart(lon, lat)) {
+    red = clamp_channel(118 + mottled * 18);
+    green = clamp_channel(86 + mottled * 12);
+    blue = clamp_channel(68 + mottled * 8);
+    bool heart = pluto_heart(lon, lat);
+    if (!heart && fabsf(lat) < 0.32f && fabsf(wrap_pi(lon)) > 0.95f) {
+        red = 46;
+        green = 34;
+        blue = 30;
+    }
+    if (heart) {
         red = 236;
         green = 204;
         blue = 190;
+    }
+    if (!heart && (in_oval(lon, lat, 2.15f, 0.42f, 0.18f, 0.14f) || in_oval(lon, lat, -1.35f, -0.48f, 0.16f, 0.12f))) {
+        red = 232;
+        green = 220;
+        blue = 206;
     }
 }
 
@@ -569,25 +691,50 @@ static void shade_body(int stop, float nx, float ny, float nz, int &red, int &gr
         green = (int)(green + (248 - green) * ice);
         blue = (int)(blue + (252 - blue) * ice);
     }
+    if (stop == STOP_EARTH && ice < 0.15f && light < 0.48f) {
+        int col = 0;
+        if (earth_clouds(lon, lat) < 0.45f && on_land(lon, lat, col)) {
+            int row_key = (int)((lat + HALF_PI) * 8.0f);
+            uint32_t h = mix((uint32_t)col * 19u + (uint32_t)row_key * 131u + 7u);
+            if ((h % 4u) == 0u) {
+                float night = (0.48f - light) / 0.48f;
+                red = (int)(red + (255 - red) * night);
+                green = (int)(green + (186 - green) * night);
+                blue = (int)(blue + (70 - blue) * night);
+            }
+        }
+    }
 }
 
-static void focus_world(int focus, float &wx, float &wy) {
-    if (focus <= STOP_SUN) {
-        wx = CX;
-        wy = CY;
-        return;
-    }
-    float angle = focus == STOP_BELT ? belt_anchor : orbit_angle[focus];
-    float radius = ORBIT_R[focus];
-    wx = CX + cosf(angle) * radius;
-    wy = CY + sinf(angle) * radius * SQUASH;
+static void orbit_xyz(float angle, float radius, float incl, float node, float &x, float &y, float &z) {
+    float ci = cosf(incl);
+    float si = sinf(incl);
+    float cn = cosf(node);
+    float sn = sinf(node);
+    float ca = cosf(angle);
+    float sa = sinf(angle);
+    x = radius * (cn * ca - sn * sa * ci);
+    y = radius * (sn * ca + cn * sa * ci);
+    z = radius * sa * si;
+}
+
+static void view_of(float x, float y, float z, float &sx, float &sy, float &depth) {
+    float c = cosf(cam_yaw);
+    float s = sinf(cam_yaw);
+    float x1 = x * c - y * s;
+    float y1 = x * s + y * c;
+    float sp = sinf(cam_pitch);
+    float cp = cosf(cam_pitch);
+    sx = CX + x1;
+    sy = CY + y1 * sp - z * cp;
+    depth = y1 * cp + z * sp;
 }
 
 // zoom 0 leaves every world where it is. zoom 1 parks the focus body on the centre and spreads the rings.
-static void project_world(float wx, float wy, float fx, float fy, float zoom_now, float roll, float &sx, float &sy) {
+static void orient_screen(float &sx, float &sy, float fx, float fy, float zoom_now, float roll) {
     float scale = 1.0f + zoom_now * 2.4f;
-    sx = fx + (wx - fx) * scale + (CX - fx) * zoom_now;
-    sy = fy + (wy - fy) * scale + (CY - fy) * zoom_now;
+    sx = fx + (sx - fx) * scale + (CX - fx) * zoom_now;
+    sy = fy + (sy - fy) * scale + (CY - fy) * zoom_now;
     float dx = sx - CX;
     float dy = sy - CY;
     float c = cosf(roll);
@@ -621,36 +768,85 @@ static void to_local(float sx, float sy, float body_cx, float body_cy, float rol
 static void draw_wide_stars(uint8_t *frame, uint32_t anim_ms, float zoom_now, float roll, float alpha) {
     for (int i = 0; i < WIDE_STARS; ++i) {
         uint32_t n = mix(0x5100u + (uint32_t)i * 97u);
-        float wx = (float)(n % 64u);
-        float wy = (float)((n >> 8) % 64u);
-        float scale = 1.0f + zoom_now * 0.35f * 2.4f;
-        float sx = CX + (wx - CX) * scale;
-        float sy = CY + (wy - CY) * scale;
-        float dx = sx - CX;
-        float dy = sy - CY;
-        float c = cosf(roll);
-        float s = sinf(roll);
-        sx = CX + dx * c - dy * s;
-        sy = CY + dx * s + dy * c;
+        float az = (n % 1000u) * 0.0062832f;
+        float el = ((n >> 10) % 1000u) * 0.0016f - 0.80f;
+        float reach = 46.0f;
+        float x = cosf(el) * cosf(az) * reach;
+        float y = cosf(el) * sinf(az) * reach;
+        float z = sinf(el) * reach;
+        float sx;
+        float sy;
+        float depth;
+        view_of(x, y, z, sx, sy, depth);
+        orient_screen(sx, sy, CX, CY, zoom_now * 0.35f, roll);
         int level = star_level(n, anim_ms);
         int blue = level + (int)(n % 3u);
         paint_f(frame, sx, sy, level, level, blue, alpha);
+        (void)depth;
     }
 }
 
-static void draw_orbit(uint8_t *frame, float radius, int red, int green, int blue, float fx, float fy, float zoom_now, float roll, float alpha) {
-    int steps = (int)(radius * 6.0f);
-    if (steps < 48) {
-        steps = 48;
+struct Mark {
+    int16_t x;
+    int16_t y;
+    int16_t depth;
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    uint8_t alpha;
+    uint8_t size;
+};
+
+constexpr int MARK_CAP = 1600;
+static Mark marks[MARK_CAP];
+static int mark_count = 0;
+
+static void draw_blob(uint8_t *frame, float x, float y, int radius2, int red, int green, int blue, float alpha);
+
+static int mark_farther(const void *left, const void *right) {
+    int a = ((const Mark *)left)->depth;
+    int b = ((const Mark *)right)->depth;
+    return (a > b) - (a < b);
+}
+
+static void push_mark(float sx, float sy, float depth, int red, int green, int blue, int size, float alpha, float fx, float fy, float zoom_now, float roll) {
+    if (mark_count >= MARK_CAP) {
+        return;
     }
-    for (int i = 0; i < steps; ++i) {
-        float angle = TWO_PI * (float)i / (float)steps;
-        float wx = CX + cosf(angle) * radius;
-        float wy = CY + sinf(angle) * radius * SQUASH;
-        float sx;
-        float sy;
-        project_world(wx, wy, fx, fy, zoom_now, roll, sx, sy);
-        paint_f(frame, sx, sy, red, green, blue, alpha);
+    orient_screen(sx, sy, fx, fy, zoom_now, roll);
+    int x = (int)lroundf(sx);
+    int y = (int)lroundf(sy);
+    if (x < -3 || y < -3 || x >= PANEL_WIDTH + 3 || y >= PANEL_HEIGHT + 3) {
+        return;
+    }
+    Mark &mark = marks[mark_count];
+    mark.x = (int16_t)x;
+    mark.y = (int16_t)y;
+    mark.depth = (int16_t)(depth * 32.0f);
+    mark.r = (uint8_t)red;
+    mark.g = (uint8_t)green;
+    mark.b = (uint8_t)blue;
+    int cover = (int)(alpha * 255.0f + 0.5f);
+    if (cover > 255) {
+        cover = 255;
+    }
+    mark.alpha = (uint8_t)cover;
+    mark.size = (uint8_t)size;
+    mark_count += 1;
+}
+
+static void paint_marks(uint8_t *frame) {
+    std::qsort(marks, (size_t)mark_count, sizeof(Mark), mark_farther);
+    for (int i = 0; i < mark_count; ++i) {
+        const Mark &mark = marks[i];
+        float alpha = mark.alpha / 255.0f;
+        if (mark.size == 0) {
+            paint(frame, mark.x, mark.y, mark.r, mark.g, mark.b, alpha);
+        } else if (mark.size == 1) {
+            draw_blob(frame, mark.x, mark.y, 1, mark.r, mark.g, mark.b, alpha);
+        } else {
+            draw_blob(frame, mark.x, mark.y, 2, mark.r, mark.g, mark.b, alpha);
+        }
     }
 }
 
@@ -666,55 +862,140 @@ static void draw_blob(uint8_t *frame, float x, float y, int radius2, int red, in
     }
 }
 
+static void body_xyz(int stop, float &x, float &y, float &z) {
+    if (stop <= STOP_SUN) {
+        x = 0.0f;
+        y = 0.0f;
+        z = 0.0f;
+        return;
+    }
+    float angle = stop == STOP_BELT ? belt_anchor : orbit_angle[stop];
+    orbit_xyz(angle, ORBIT_R[stop], HOOP[stop].incl, HOOP[stop].node, x, y, z);
+}
+
+static float line_shade(float depth) {
+    float near = clampf(depth / 36.0f, -1.0f, 1.0f);
+    return 0.50f + 0.50f * (near * 0.5f + 0.5f);
+}
+
 static void draw_orrery(uint8_t *frame, uint32_t anim_ms, float zoom_now, float roll, float alpha) {
     draw_wide_stars(frame, anim_ms, zoom_now, roll, alpha);
+    mark_count = 0;
     int focus = target == STOP_WIDE ? depart : target;
+    float focus_x;
+    float focus_y;
+    float focus_z;
+    body_xyz(focus, focus_x, focus_y, focus_z);
     float fx;
     float fy;
-    focus_world(focus, fx, fy);
+    float focus_depth;
+    view_of(focus_x, focus_y, focus_z, fx, fy, focus_depth);
+    (void)focus_depth;
     for (int stop = STOP_MERCURY; stop <= STOP_PLUTO; ++stop) {
         const Ink &ink = INK[stop];
-        draw_orbit(frame, ORBIT_R[stop], ink.r * 4 / 10, ink.g * 4 / 10, ink.b * 4 / 10, fx, fy, zoom_now, roll, alpha);
+        int steps = (int)(ORBIT_R[stop] * 6.0f);
+        if (steps < 48) {
+            steps = 48;
+        }
+        for (int i = 0; i < steps; ++i) {
+            float angle = TWO_PI * (float)i / (float)steps;
+            float x;
+            float y;
+            float z;
+            orbit_xyz(angle, ORBIT_R[stop], HOOP[stop].incl, HOOP[stop].node, x, y, z);
+            float sx;
+            float sy;
+            float depth;
+            view_of(x, y, z, sx, sy, depth);
+            float shade = line_shade(depth);
+            push_mark(sx, sy, depth, (int)(ink.r * 0.4f * shade), (int)(ink.g * 0.4f * shade), (int)(ink.b * 0.4f * shade), 0, alpha, fx, fy, zoom_now, roll);
+        }
     }
     for (int i = 0; i < BELT_DOTS; ++i) {
-        float radius = ORBIT_R[STOP_BELT] + belt_jitter[i];
-        float angle = belt_dot[i];
-        float wx = CX + cosf(angle) * radius;
-        float wy = CY + sinf(angle) * radius * SQUASH;
+        float x;
+        float y;
+        float z;
+        orbit_xyz(belt_dot[i], ORBIT_R[STOP_BELT] + belt_jitter[i], HOOP[STOP_BELT].incl, HOOP[STOP_BELT].node, x, y, z);
+        z += belt_lift[i];
         float sx;
         float sy;
-        project_world(wx, wy, fx, fy, zoom_now, roll, sx, sy);
-        paint_f(frame, sx, sy, 132, 112, 74, alpha);
+        float depth;
+        view_of(x, y, z, sx, sy, depth);
+        push_mark(sx, sy, depth, 132, 112, 74, 0, alpha, fx, fy, zoom_now, roll);
     }
     for (int stop = STOP_MERCURY; stop <= STOP_PLUTO; ++stop) {
         if (stop == STOP_BELT) {
             continue;
         }
-        float angle = orbit_angle[stop];
-        float wx = CX + cosf(angle) * ORBIT_R[stop];
-        float wy = CY + sinf(angle) * ORBIT_R[stop] * SQUASH;
+        float x;
+        float y;
+        float z;
+        body_xyz(stop, x, y, z);
         float sx;
         float sy;
-        project_world(wx, wy, fx, fy, zoom_now, roll, sx, sy);
+        float depth;
+        view_of(x, y, z, sx, sy, depth);
         const Ink &ink = INK[stop];
-        if (stop == STOP_JUPITER || stop == STOP_SATURN) {
-            draw_blob(frame, sx, sy, 1, ink.r, ink.g, ink.b, alpha);
-        } else {
-            paint_f(frame, sx, sy, ink.r, ink.g, ink.b, alpha);
-        }
+        int size = (stop == STOP_JUPITER || stop == STOP_SATURN) ? 1 : 0;
+        push_mark(sx, sy, depth + 0.4f, ink.r, ink.g, ink.b, size, alpha, fx, fy, zoom_now, roll);
         if (stop == STOP_SATURN) {
-            for (int k = -2; k <= 2; ++k) {
-                paint_f(frame, sx + k * 0.95f, sy + k * 0.32f, 210, 180, 120, alpha);
+            float sun_x;
+            float sun_y;
+            float sun_depth;
+            view_of(0.0f, 0.0f, 0.0f, sun_x, sun_y, sun_depth);
+            (void)sun_depth;
+            float dx = sx - sun_x;
+            float dy = sy - sun_y;
+            float len = sqrtf(dx * dx + dy * dy);
+            if (len > 1.0f) {
+                float tx = -dy / len;
+                float ty = dx / len;
+                for (int k = -2; k <= 2; ++k) {
+                    if (k == 0) {
+                        continue;
+                    }
+                    push_mark(sx + tx * k * 1.15f, sy + ty * k * 1.15f, depth + 0.3f, 210, 180, 120, 0, alpha, fx, fy, zoom_now, roll);
+                }
             }
         }
     }
     float sun_x;
     float sun_y;
-    project_world(CX, CY, fx, fy, zoom_now, roll, sun_x, sun_y);
-    draw_blob(frame, sun_x, sun_y, 2, 255, 210, 80, alpha);
+    float sun_depth;
+    view_of(0.0f, 0.0f, 0.0f, sun_x, sun_y, sun_depth);
+    push_mark(sun_x, sun_y, sun_depth + 0.2f, 255, 210, 80, 2, alpha, fx, fy, zoom_now, roll);
+    paint_marks(frame);
 }
 
-static bool saturn_ring(float x, float y, float radius, bool &gap) {
+static void follow_hand(float dt) {
+    float gx = 0.0f;
+    float gy = 0.0f;
+    float gz = 0.0f;
+    if (!environment_gravity(gx, gy, gz)) {
+        return;
+    }
+    float gain = environment_imu_gain();
+    float horiz = sqrtf(gx * gx + gy * gy);
+    float tip = atan2f(horiz, fabsf(gz)) * gain;
+    if (tip > 1.25f) {
+        tip = 1.25f;
+    }
+    float goal_pitch = CAM_PITCH - tip * 0.80f;
+    float blend = 1.0f - expf(-dt * 7.0f);
+    cam_pitch += (goal_pitch - cam_pitch) * blend;
+    if (gain <= 0.0f) {
+        cam_yaw = wrap_pi(cam_yaw * (1.0f - blend));
+        return;
+    }
+    if (horiz > 0.18f) {
+        float heading = atan2f(gy, gx);
+        float turn = wrap_pi(heading - cam_yaw);
+        float follow = clampf((horiz - 0.18f) / 0.35f, 0.0f, 1.0f) * clampf(gain, 0.0f, 1.0f);
+        cam_yaw = wrap_pi(cam_yaw + turn * blend * follow);
+    }
+}
+
+static bool saturn_ring(float x, float y, float radius, bool &gap, float &shine) {
     constexpr float tilt = 0.38f;
     float c = cosf(tilt);
     float s = sinf(tilt);
@@ -731,6 +1012,7 @@ static bool saturn_ring(float x, float y, float radius, bool &gap) {
     }
     float t = (dist - inner) / (1.0f - inner);
     gap = t > 0.46f && t < 0.58f;
+    shine = t < 0.46f ? 1.0f : 0.70f;
     return true;
 }
 
@@ -747,11 +1029,143 @@ static bool uranus_ring(float x, float y, float radius) {
     return dist <= 1.0f && span >= inner && span <= reach;
 }
 
+static float flare_env(float age, float life) {
+    float u = age / life;
+    if (u < 0.18f) {
+        return u / 0.18f;
+    }
+    if (u > 0.62f) {
+        return (1.0f - u) / 0.38f;
+    }
+    return 1.0f;
+}
+
+static void spawn_flare(int index) {
+    uint32_t n = mix(flare_salt + (uint32_t)index * 97u + (uint32_t)(corona_time * 1000.0f));
+    flare_salt = n;
+    Flare &flare = flares[index];
+    flare.angle = (n % 1000u) * 0.0062832f;
+    flare.length = 5.2f + (float)(n % 32u) * 0.1f;
+    flare.life = 0.90f + (float)((n >> 8) % 18u) * 0.06f;
+    flare.age = 0.0f;
+    flare.wait = 0.0f;
+    flare.kind = (int)((n >> 16) & 1u);
+}
+
+static void init_flares() {
+    flare_salt = 0x51u;
+    corona_time = 0.0f;
+    for (int i = 0; i < FLARE_COUNT; ++i) {
+        spawn_flare(i);
+        if (i < 2) {
+            flares[i].age = flares[i].life * (i == 0 ? 0.40f : 0.12f);
+            flares[i].kind = i;
+        } else {
+            flares[i].wait = 0.55f * (float)(i - 1);
+        }
+    }
+}
+
+static void step_flares(float dt) {
+    corona_time += dt;
+    for (int i = 0; i < FLARE_COUNT; ++i) {
+        Flare &flare = flares[i];
+        if (flare.wait > 0.0f) {
+            flare.wait -= dt;
+            if (flare.wait <= 0.0f) {
+                spawn_flare(i);
+            }
+            continue;
+        }
+        flare.age += dt;
+        if (flare.age >= flare.life) {
+            uint32_t n = mix(flare_salt + (uint32_t)i * 13u);
+            flare_salt = n;
+            flare.wait = 0.9f + (float)(n % 40u) * 0.09f;
+        }
+    }
+}
+
+static bool corona_colour(float lx, float ly, float radius, int &red, int &green, int &blue, float &cover, float &prom_out) {
+    float dist = sqrtf(lx * lx + ly * ly);
+    if (dist < radius - 2.2f || dist > radius + 10.0f) {
+        return false;
+    }
+    float ang = atan2f(ly, lx);
+    float spin = spin_angle[STOP_SUN];
+    float body = ang - spin;
+    constexpr float streamer[4] = {0.35f, 1.85f, 3.55f, 5.10f};
+    float reach = 4.8f + 2.2f * (0.5f + 0.5f * cosf(body * 2.0f));
+    float spike = 0.0f;
+    float prom = 0.0f;
+    for (int i = 0; i < 4; ++i) {
+        float d = wrap_pi(body - streamer[i]);
+        float w = expf(-d * d * 28.0f);
+        reach += 5.0f * w;
+        spike += 0.55f * w;
+    }
+    float grain = 0.82f + 0.18f * sinf(body * 13.0f + corona_time * 2.4f);
+    for (int i = 0; i < FLARE_COUNT; ++i) {
+        const Flare &flare = flares[i];
+        if (flare.wait > 0.0f || flare.life <= 0.0f) {
+            continue;
+        }
+        float env = flare_env(flare.age, flare.life);
+        float aim = flare.angle + spin;
+        if (flare.kind == 0) {
+            float d = wrap_pi(ang - aim);
+            float w = expf(-d * d * 16.0f);
+            reach += flare.length * env * w;
+            spike += 1.6f * env * w;
+        } else {
+            // Centre sits on the limb, so the outward half is an arch with both feet on the disc.
+            float arch = 2.6f + flare.length * 0.22f * env;
+            float cx = cosf(aim) * radius;
+            float cy = sinf(aim) * radius;
+            float ring = fabsf(sqrtf((lx - cx) * (lx - cx) + (ly - cy) * (ly - cy)) - arch);
+            float from_limb = (lx - cx) * cosf(aim) + (ly - cy) * sinf(aim);
+            if (from_limb > -1.2f && ring < 2.0f) {
+                prom += env * (1.0f - ring / 2.0f);
+            }
+        }
+    }
+    prom_out = clampf(prom, 0.0f, 1.0f);
+    if (dist <= radius && prom_out < 0.25f) {
+        return false;
+    }
+    float fall = 1.0f - (dist - radius) / reach;
+    if (fall <= 0.0f && prom <= 0.05f) {
+        return false;
+    }
+    if (fall < 0.0f) {
+        fall = 0.0f;
+    }
+    fall *= grain;
+    float glow = fall * (72.0f + spike * 110.0f);
+    if (prom_out > 0.4f) {
+        red = clamp_channel(236.0f * prom_out + glow * 0.12f);
+        green = clamp_channel(72.0f * prom_out);
+        blue = clamp_channel(46.0f * prom_out);
+        cover = prom_out;
+        return true;
+    }
+    red = clamp_channel(glow);
+    green = clamp_channel(glow * (0.42f + spike * 0.40f));
+    blue = clamp_channel(glow * (0.08f + spike * 0.50f));
+    cover = clampf(fall * 0.85f + spike * fall * 0.35f, 0.0f, 1.0f);
+    return cover > 0.04f;
+}
+
 static void draw_disc(uint8_t *frame, int stop, float body_cx, float body_cy, float radius, float roll, float alpha) {
     float scx;
     float scy;
     to_screen(0.0f, 0.0f, body_cx, body_cy, roll, scx, scy);
-    float pad = stop == STOP_SATURN ? radius * 2.15f : radius + 6.0f;
+    float pad = radius + 6.0f;
+    if (stop == STOP_SATURN) {
+        pad = radius * 2.15f;
+    } else if (stop == STOP_SUN) {
+        pad = radius + 10.0f;
+    }
     int x0 = (int)floorf(scx - pad);
     int y0 = (int)floorf(scy - pad);
     int x1 = (int)ceilf(scx + pad);
@@ -775,13 +1189,14 @@ static void draw_disc(uint8_t *frame, int stop, float body_cx, float body_cy, fl
             to_local((float)x, (float)y, body_cx, body_cy, roll, lx, ly);
             float dist = sqrtf(lx * lx + ly * ly);
             bool gap = false;
+            float shine = 1.0f;
             bool ring = false;
             if (stop == STOP_SATURN) {
-                ring = saturn_ring(lx, ly, radius, gap);
+                ring = saturn_ring(lx, ly, radius, gap, shine);
             }
             bool far_ring = ring && ly <= 0.0f && dist > radius;
             if (far_ring && !gap) {
-                paint(frame, x, y, 206, 176, 118, alpha * 0.92f);
+                paint(frame, x, y, (int)(206 * shine), (int)(176 * shine), (int)(118 * shine), alpha * 0.92f);
             }
             if (stop == STOP_URANUS && dist > radius && uranus_ring(lx, ly, radius)) {
                 paint(frame, x, y, 170, 230, 226, alpha);
@@ -796,16 +1211,32 @@ static void draw_disc(uint8_t *frame, int stop, float body_cx, float body_cy, fl
                 int blue = 0;
                 shade_body(stop, nx, ny, nz, red, green, blue);
                 paint(frame, x, y, red, green, blue, alpha * cover);
-            } else if (stop == STOP_SUN && dist < radius + 5.5f && dist > radius) {
-                float ang = atan2f(ly, lx);
-                float ray = 0.62f + 0.38f * sinf(ang * 9.0f + spin_angle[STOP_SUN]);
-                float fall = 1.0f - (dist - radius) / 5.5f;
-                int glow = (int)(fall * ray * 70.0f);
-                paint(frame, x, y, glow + 30, glow, glow / 5, alpha * fall);
+                if (stop == STOP_SUN && dist > radius - 2.2f) {
+                    int ray_r = 0;
+                    int ray_g = 0;
+                    int ray_b = 0;
+                    float ray = 0.0f;
+                    float prom = 0.0f;
+                    if (corona_colour(lx, ly, radius, ray_r, ray_g, ray_b, ray, prom) && prom > 0.35f) {
+                        paint(frame, x, y, 236, 78, 52, alpha * prom);
+                    }
+                }
+            } else if (stop == STOP_EARTH && dist < radius + 1.8f) {
+                float fall = 1.0f - (dist - radius) / 1.8f;
+                paint(frame, x, y, 86, 156, 226, alpha * fall * 0.9f);
+            } else if (stop == STOP_SUN) {
+                int red = 0;
+                int green = 0;
+                int blue = 0;
+                float cover_ray = 0.0f;
+                float prom = 0.0f;
+                if (corona_colour(lx, ly, radius, red, green, blue, cover_ray, prom)) {
+                    paint(frame, x, y, red, green, blue, alpha * cover_ray);
+                }
             }
             bool near_ring = ring && ly > 0.0f;
             if (near_ring && !gap) {
-                paint(frame, x, y, 214, 184, 124, alpha * 0.95f);
+                paint(frame, x, y, (int)(214 * shine), (int)(184 * shine), (int)(124 * shine), alpha * 0.95f);
             }
         }
     }
@@ -978,6 +1409,7 @@ static void step_motion(float dt) {
     for (int stop = STOP_SUN; stop <= STOP_PLUTO; ++stop) {
         spin_angle[stop] = wrap_tau(spin_angle[stop] + (IDLE_SPIN[stop] + spin_vel[stop]) * dt);
     }
+    cloud_time += dt;
     for (int i = 0; i < MOON_COUNT; ++i) {
         moon_angle[i] = wrap_tau(moon_angle[i] + TWO_PI / MOONS[i].period * dt);
     }
@@ -1044,6 +1476,7 @@ static void init_field() {
         belt_dot[i] = (n % 6283u) * 0.001f;
         belt_period[i] = 140.0f + (float)(n % 100u);
         belt_jitter[i] = ((int)(n % 5u) - 2) * 0.55f;
+        belt_lift[i] = ((int)((n >> 12) % 9u) - 4) * 0.55f;
     }
     for (int i = 0; i < ROCKS; ++i) {
         uint32_t n = mix(400u + (uint32_t)i * 17u);
@@ -1074,6 +1507,9 @@ static void reset_motion() {
     zoom_v = 0.0f;
     red_held = false;
     orrery_vel = 0.0f;
+    cam_pitch = CAM_PITCH;
+    cam_yaw = 0.0f;
+    cloud_time = 0.0f;
     belt_anchor = PHASE0[STOP_BELT];
     for (int stop = 0; stop < STOP_COUNT; ++stop) {
         spin_angle[stop] = 0.0f;
@@ -1084,6 +1520,7 @@ static void reset_motion() {
         moon_angle[i] = MOONS[i].phase;
     }
     init_field();
+    init_flares();
 }
 
 }  // namespace
@@ -1094,6 +1531,8 @@ void solar_start() {
 
 void solar_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     advance(dt_ms);
+    step_flares(dt_ms * 0.001f);
+    follow_hand(dt_ms * 0.001f);
     std::memset(frame, 0, PANEL_PIXELS * 3);
     float draw_zoom = clampf(zoom, 0.0f, 1.0f);
     float roll = sinf(draw_zoom * PI) * 0.21f;

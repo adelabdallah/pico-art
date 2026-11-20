@@ -36,6 +36,7 @@
 // On liquid, yellow starts and stops the microphone. Listening starts on. Orange still adds a diagonal there.
 // On settings, blue moves to the next value. Elsewhere blue shifts the hue. Orange and yellow stay quiet there.
 // On solar, the encoder walks from the wide view through each world and back. Red flings that world's spin, or the whole orrery on the wide view.
+// On the wide view, tipping the panel looks around the hoops. Flat and face up is the resting view.
 // The mirrors clear on reboot.
 // Encoder A is GP16, B is GP17, and the click is GP18. Each goes to ground. Clockwise is A changing before B.
 //

@@ -77,6 +77,7 @@ static bool meter_peak = false;
 static bool listening = false;
 static int viscosity = 0;
 static bool mpu_ready = false;
+static bool mpu_tried = false;
 static uint32_t last_sample_ms = 0;
 static uint32_t last_onset_ms = 0;
 
@@ -522,6 +523,36 @@ bool environment_axes(float &x_g, float &y_g) {
     return read_tilt(x_g, y_g);
 }
 
+static bool read_gravity(float &x_g, float &y_g, float &z_g) {
+    uint8_t raw[6];
+    if (!mpu_read(REG_ACCEL, raw, 6)) {
+        return false;
+    }
+    int ax = (int16_t)((raw[0] << 8) | raw[1]);
+    int ay = (int16_t)((raw[2] << 8) | raw[3]);
+    int az = (int16_t)((raw[4] << 8) | raw[5]);
+    // Same swap and reverse as the cup. Z is the raw axis out of the module.
+    x_g = -(float)ay / ACCEL_LSB;
+    y_g = -(float)ax / ACCEL_LSB;
+    z_g = (float)az / ACCEL_LSB;
+    return true;
+}
+
+bool environment_gravity(float &x_g, float &y_g, float &z_g) {
+    if (!mpu_ready && !mpu_tried) {
+        mpu_tried = true;
+        mpu_ready = init_mpu();
+    }
+    if (!mpu_ready) {
+        return false;
+    }
+    return read_gravity(x_g, y_g, z_g);
+}
+
+float environment_imu_gain() {
+    return imu_gain();
+}
+
 void environment_start() {
     listening = true;
     meter_level = 0.0f;
@@ -543,6 +574,7 @@ void environment_start() {
     splash_goal = 0.0f;
     glint = 0.0f;
     glint_x = (PANEL_WIDTH - 1) * 0.5f;
+    mpu_tried = true;
     mpu_ready = init_mpu();
     if (mpu_ready) {
         capture_zero();
