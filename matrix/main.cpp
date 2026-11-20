@@ -3,11 +3,11 @@
 // Each pattern lives in its own directory and paints the same framebuffer.
 // The encoder click flashes the current name and scrolls the pattern list. A second click selects it.
 // A step shows the next name at once, even in the middle of that flash.
-// The list ends on RESET?. A click there asks ARE YOU SURE?. Another click clears every pattern's mirrors, the slide, the turn, and the hue.
+// The list ends on RESET?. A click there asks ARE YOU SURE?. Another click clears every pattern's mirrors, slide, turn, and the hue.
 // Outside that mode, the encoder flings the picture sideways, or edits the open setting.
 // Settings is the last pattern. There, blue picks a value and the encoder raises or lowers it.
 // The pattern and the settings are stored in the last flash sector and restored on boot.
-// Pause, speed, turn, sideways position, and each pattern's mirrors last until power-off.
+// Pause and speed last until power-off. Each pattern keeps its own turn, sideways slide, and mirrors until then.
 // Each pattern starts running at full speed.
 //
 // Wire the panel the way the Waveshare Pico example does.
@@ -315,7 +315,16 @@ struct PatternMirrors {
     MirrorCircle circle[MIRROR_CIRCLE_CAP];
 };
 
+// Slide and turn belong to one pattern. A switch puts that pattern's own view back.
+struct PatternView {
+    float shift_x;
+    float shift_v;
+    float angle;
+    float target;
+};
+
 static PatternMirrors mirrors[PATTERN_COUNT];
+static PatternView views[PATTERN_COUNT];
 static uint32_t mirror_state = 0;
 static int held_line_pattern = -1;
 static int held_line_index = -1;
@@ -688,6 +697,22 @@ static void reset_play() {
     clear_pause();
 }
 
+static void store_view(int index) {
+    PatternView &view = views[index];
+    view.shift_x = shift_x;
+    view.shift_v = shift_v;
+    view.angle = view_angle;
+    view.target = view_target;
+}
+
+static void load_view(int index) {
+    const PatternView &view = views[index];
+    shift_x = view.shift_x;
+    shift_v = view.shift_v;
+    view_angle = view.angle;
+    view_target = view.target;
+}
+
 static void commit_pattern(int index) {
     if (index < 0) {
         index = PATTERN_COUNT - 1;
@@ -695,6 +720,10 @@ static void commit_pattern(int index) {
         index = 0;
     }
     bool changed = index != settings.pattern;
+    if (changed) {
+        store_view(settings.pattern);
+        load_view(index);
+    }
     settings.pattern = index;
     anim_ms = 0;
     anim_frac = 0.0f;
@@ -1320,6 +1349,9 @@ static void clear_view() {
     circle_growing = false;
     held_line_index = -1;
     held_circle_index = -1;
+    for (int i = 0; i < PATTERN_COUNT; ++i) {
+        views[i] = {};
+    }
     shift_x = 0.0f;
     shift_v = 0.0f;
     view_angle = 0.0f;
