@@ -146,14 +146,14 @@ void reaction_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 void life_start();
 void life_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 
-void ant_start();
-void ant_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void flow_start();
+void flow_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+
+void voronoi_start();
+void voronoi_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 
 void loop_start();
 void loop_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
-
-void rule30_start();
-void rule30_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 
 void environment_start();
 void environment_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
@@ -186,6 +186,35 @@ void solar_turn(int steps);
 void solar_red_tap();
 void solar_red_hold();
 void solar_red_release();
+
+void campfire_start();
+void campfire_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+
+void skyline_start();
+void skyline_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void skyline_move(int dx, int dy);
+
+void lighthouse_start();
+void lighthouse_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void lighthouse_spin(int steps);
+
+void ferris_start();
+void ferris_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void ferris_spin(int steps);
+
+void aurora_start();
+void aurora_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+
+void fireworks_start();
+void fireworks_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+
+void wireframe_start();
+void wireframe_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void wireframe_speed(int steps);
+
+void galaxy_start();
+void galaxy_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void galaxy_spin(int steps);
 
 void settings_start();
 void settings_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);

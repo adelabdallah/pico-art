@@ -36,6 +36,8 @@
 // On liquid, yellow starts and stops the microphone. Listening starts on. Orange still adds a diagonal there.
 // On settings, blue moves to the next value. Elsewhere blue shifts the hue. Orange and yellow stay quiet there.
 // On solar, the encoder walks from the wide view through each world and back. Red flings that world's spin, or the whole orrery on the wide view.
+// On skyline, orange moves the view up and yellow moves it down. The encoder moves the view left and right, and the view stops at the edge of the harbour.
+// On lighthouse, ferris wheel, galaxy, and wireframe, the encoder changes how fast the beam, the wheel, the disk, and the flight move. Clockwise is faster. Rain, rim lights, stars, and the wireframe sway keep their own pace.
 // On the wide view, tipping the panel looks around the hoops. Flat and face up is the resting view.
 // The mirrors clear on reboot.
 // Encoder A is GP16, B is GP17, and the click is GP18. Each goes to ground. Clockwise is A changing before B.
@@ -146,13 +148,21 @@ Pattern patterns[] = {
     {"metaballs", metaballs_start, metaballs_draw},
     {"reaction", reaction_start, reaction_draw},
     {"life", life_start, life_draw},
-    {"ant", ant_start, ant_draw},
+    {"flow field", flow_start, flow_draw},
+    {"voronoi cells", voronoi_start, voronoi_draw},
     {"loop", loop_start, loop_draw},
-    {"rule30", rule30_start, rule30_draw},
     {"liquid", environment_start, environment_draw},
     {"pipes", pipes_start, pipes_draw},
     {"reef", reef_start, reef_draw},
     {"solar", solar_start, solar_draw},
+    {"campfire", campfire_start, campfire_draw},
+    {"skyline", skyline_start, skyline_draw},
+    {"lighthouse", lighthouse_start, lighthouse_draw},
+    {"ferris wheel", ferris_start, ferris_draw},
+    {"aurora", aurora_start, aurora_draw},
+    {"fireworks", fireworks_start, fireworks_draw},
+    {"wireframe", wireframe_start, wireframe_draw},
+    {"galaxy", galaxy_start, galaxy_draw},
     {"settings", settings_start, settings_draw},
 };
 
@@ -163,7 +173,7 @@ constexpr uint32_t PATTERN_MAGIC = 0x6d617458;
 constexpr uint32_t PATTERN_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 
 // version 0 is a record from before the settings page. Those boots keep pattern, brightness, and hue.
-constexpr uint32_t PATTERN_VERSION = 2;
+constexpr uint32_t PATTERN_VERSION = 4;
 
 struct SavedPattern {
     uint32_t magic;
@@ -332,6 +342,17 @@ static Settings load_settings() {
     if (saved->index < (uint32_t)PATTERN_COUNT) {
         loaded.pattern = (int)saved->index;
     }
+    // Version 2 saved the settings pattern at index 13. That pattern is the last entry now.
+    if (saved->version == 2 && saved->index == 13) {
+        loaded.pattern = PATTERN_COUNT - 1;
+    } else if (saved->version == 2 || saved->version == 3) {
+        // Ant was index 6 and rule 30 was index 8. Loop was index 7 and is index 8 now.
+        if (saved->index == 6 || saved->index == 8) {
+            loaded.pattern = 5;
+        } else if (saved->index == 7) {
+            loaded.pattern = 8;
+        }
+    }
     // Stored as percent + 1. Zero is a record from before brightness was saved.
     if (saved->brightness >= 1 && saved->brightness <= 101) {
         int percent = (int)saved->brightness - 1;
@@ -347,7 +368,7 @@ static Settings load_settings() {
     if (saved->version == 0) {
         return loaded;
     }
-    if (saved->version != 1 && saved->version != PATTERN_VERSION) {
+    if (saved->version != 1 && saved->version != 2 && saved->version != 3 && saved->version != PATTERN_VERSION) {
         return loaded;
     }
     if (saved->mic_sens <= 100 && saved->mic_sens % BRIGHTNESS_STEP == 0) {
@@ -420,6 +441,26 @@ static bool on_settings() {
 
 static bool on_solar() {
     return std::strcmp(patterns[settings.pattern].name, "solar") == 0;
+}
+
+static bool on_skyline() {
+    return std::strcmp(patterns[settings.pattern].name, "skyline") == 0;
+}
+
+static bool on_lighthouse() {
+    return std::strcmp(patterns[settings.pattern].name, "lighthouse") == 0;
+}
+
+static bool on_ferris() {
+    return std::strcmp(patterns[settings.pattern].name, "ferris wheel") == 0;
+}
+
+static bool on_galaxy() {
+    return std::strcmp(patterns[settings.pattern].name, "galaxy") == 0;
+}
+
+static bool on_wireframe() {
+    return std::strcmp(patterns[settings.pattern].name, "wireframe") == 0;
 }
 
 static bool led_forever() {
@@ -1445,6 +1486,15 @@ static void poll_button(PanelButton &button, uint32_t now) {
         }
         return;
     }
+    if (on_skyline() && (button.role == ButtonRole::Line || button.role == ButtonRole::Circle)) {
+        int dir = button.role == ButtonRole::Line ? -1 : 1;
+        if (pressed) {
+            skyline_move(0, dir * 4);
+        } else if (down && (int32_t)(now - button.pressed_at) >= HOLD_MS) {
+            skyline_move(0, dir);
+        }
+        return;
+    }
     if (button.role == ButtonRole::Line || button.role == ButtonRole::Circle) {
         if (pressed && on_settings()) {
             if (button.role == ButtonRole::Line) {
@@ -1591,6 +1641,41 @@ static void poll_encoder(uint32_t now) {
         }
         return;
     }
+    if (on_skyline()) {
+        int steps = consume_nav(detents);
+        if (steps != 0) {
+            skyline_move(steps * 8, 0);
+        }
+        return;
+    }
+    if (on_lighthouse()) {
+        int steps = consume_nav(detents);
+        if (steps != 0) {
+            lighthouse_spin(steps);
+        }
+        return;
+    }
+    if (on_ferris()) {
+        int steps = consume_nav(detents);
+        if (steps != 0) {
+            ferris_spin(steps);
+        }
+        return;
+    }
+    if (on_galaxy()) {
+        int steps = consume_nav(detents);
+        if (steps != 0) {
+            galaxy_spin(steps);
+        }
+        return;
+    }
+    if (on_wireframe()) {
+        int steps = consume_nav(detents);
+        if (steps != 0) {
+            wireframe_speed(steps);
+        }
+        return;
+    }
     shift_v += detents * SHIFT_IMPULSE;
     if (shift_v > SHIFT_CAP) {
         shift_v = SHIFT_CAP;
@@ -1635,7 +1720,7 @@ int main() {
     oled_set_contrast(settings.oled_bright);
 
     patterns[settings.pattern].start();
-    printf("patterns: plasma, warp, feedback, metaballs, reaction, life, ant, loop, rule30, liquid, pipes, reef, solar, settings\n");
+    printf("patterns: plasma, warp, feedback, metaballs, reaction, life, flow field, voronoi cells, loop, liquid, pipes, reef, solar, campfire, skyline, lighthouse, ferris wheel, aurora, fireworks, wireframe, galaxy, settings\n");
     show_status();
 
     uint32_t oled_at = 0;

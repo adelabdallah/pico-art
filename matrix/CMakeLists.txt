@@ -37,13 +37,21 @@ add_executable(matrix
     metaballs/metaballs.cpp
     reaction/reaction.cpp
     life/life.cpp
-    ant/ant.cpp
+    flow/flow.cpp
+    voronoi/voronoi.cpp
     loop/loop.cpp
-    rule30/rule30.cpp
     environment/environment.cpp
     pipes/pipes.cpp
     reef/reef.cpp
     solar/solar.cpp
+    campfire/campfire.cpp
+    skyline/skyline.cpp
+    lighthouse/lighthouse.cpp
+    ferris/ferris.cpp
+    aurora/aurora.cpp
+    fireworks/fireworks.cpp
+    wireframe/wireframe.cpp
+    galaxy/galaxy.cpp
     settings/settings.cpp
     ${HUB75_DIR}/hub75.cpp
     ${HUB75_DIR}/fm6126a.cpp
