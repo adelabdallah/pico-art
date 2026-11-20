@@ -99,10 +99,10 @@ struct Group {
 };
 
 constexpr Mound MOUNDS[] = {
-    {10.0f, 55.0f, 14.0f, 28.0f},
-    {30.0f, 55.0f, 12.0f, 24.0f},
-    {48.0f, 63.0f, 14.0f, 22.0f},
-    {60.0f, 67.0f, 12.0f, 22.0f},
+    {10.0f, 60.0f, 14.0f, 22.0f},
+    {30.0f, 62.0f, 12.0f, 20.0f},
+    {48.0f, 66.0f, 14.0f, 18.0f},
+    {60.0f, 68.0f, 12.0f, 16.0f},
 };
 
 constexpr Pocket POCKETS[] = {
@@ -441,9 +441,9 @@ static void build_mask() {
     }
     for (int x = 0; x < PANEL_WIDTH; ++x) {
         int top = (rock_top[x] / 2) * 2;
-        // Row 28 is the highest rock, so the water above the shelf is about 55 percent of the panel.
-        if (top < 28) {
-            top = 28;
+        // Row 38 is the highest rock, so the water above the shelf is about 70 percent of the panel.
+        if (top < 38) {
+            top = 38;
         }
         rock_top[x] = top;
     }
@@ -1246,7 +1246,7 @@ static bool find_spot(int kind, bool high, float &x, float &y) {
             span = 1;
         }
         int iy = 3 + (int)(rnd() % (uint32_t)span);
-        if (high && iy > 26) {
+        if (high && iy > 34) {
             continue;
         }
         if (!home_ok(kind, (float)ix, (float)iy)) {
@@ -1454,7 +1454,7 @@ static void spawn_into(Life &life, int slot) {
         }
         if (life.y < 12.0f && sinf(ang) < 0.0f) {
             ang = -ang;
-        } else if (life.y > 24.0f && sinf(ang) > 0.0f) {
+        } else if (life.y > 34.0f && sinf(ang) > 0.0f) {
             ang = -ang;
         }
         life.vx = cosf(ang) * life.speed;
@@ -1585,7 +1585,7 @@ static void update_school(Life &life, uint32_t anim_ms, int dt_ms) {
         }
         if (nose_y < 10.0f && ay < 0.25f) {
             ay = (10.0f - nose_y) * 0.10f;
-        } else if (nose_y > 28.0f && ay > -0.1f) {
+        } else if (nose_y > 34.0f && ay > -0.1f) {
             ay = -((nose_y - 28.0f) * 0.10f);
         }
         float desired = atan2f(ay, ax);
