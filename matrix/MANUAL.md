@@ -127,11 +127,11 @@ The encoder walks from the wide view through each world and back. A turn while t
 
 Red pauses, the same as on the other patterns. While the pattern list is open, the buttons keep their shared actions.
 
-Green flings the current world's spin, or the whole orrery on the wide view. Holding green keeps that spin going.
+Green flings the current world's spin, or the whole orrery on the wide view. On Earth and Pluto it also speeds the Moon and Charon. Holding green keeps that spin going.
 
 Orange steps outward. On a world, it returns to the wide orrery. On the wide orrery, it pulls back over about two seconds until the system sits on the outer tip of one spiral arm, and the pattern becomes galaxy when the picture arrives. A second press during that flight turns it around and brings it back along the same path.
 
-Yellow starts a tour. The wide view, the sun, each planet, the belt, and Pluto each hold for 5 seconds, and then the tour repeats. The orrery and the worlds spin as if green is held, and pitch, yaw, and roll tumble together. Another press stops the tour. While it runs, a play mark bobs in the bottom right of the OLED.
+Yellow starts a tour. The wide view, the sun, each planet, the belt, and Pluto each hold for 5 seconds, and then the tour repeats. The view tumbles slowly, the way a gentle tilt of the panel looks around the orrery and around each world. The world stays in the centre while its surface turns. The Moon and Charon speed up while the tour runs. Another press stops the tour. While it runs, a play mark bobs in the bottom right of the OLED.
 
 Blue keeps the shared hue shift.
 

@@ -40,9 +40,9 @@
 // Blue GP22 shifts the hue by a fifth of a turn, and a hold spins it, except on settings.
 // On liquid, yellow starts and stops the microphone. Listening starts on. Orange still adds a diagonal there.
 // On settings, blue moves to the next value. Elsewhere blue shifts the hue. Orange and yellow stay quiet there.
-// On solar, the encoder walks from the wide view through each world and back. Green flings that world's spin, or the whole orrery on the wide view. A hold keeps the spin going.
+// On solar, the encoder walks from the wide view through each world and back. Green flings that world's spin, or the whole orrery on the wide view, and on Earth and Pluto it also speeds the Moon and Charon. A hold keeps the spin going.
 // Orange on a world returns to the orrery. Orange on the orrery pulls back over about two seconds to the galaxy, and the pattern changes when the picture arrives. A second press during the flight turns it around.
-// Yellow tours the orrery and each world, holding each for 5 seconds, with the spin held and the view tumbling. Another press stops the tour. A play mark bobs on the OLED while it runs.
+// Yellow tours the orrery and each world, holding each for 5 seconds. The view tumbles slowly and each world stays centred while its surface turns. The Moon and Charon speed up. Another press stops the tour. A play mark bobs on the OLED while it runs.
 // On skyline, orange moves the view up and yellow moves it down. The encoder moves the view left and right, and the view stops at the edge of the harbour.
 // On lighthouse, ferris wheel, and galaxy, the encoder changes how fast the beam, the wheel, and the disk move. Clockwise is faster. The sea, the rim lights, and the stars keep their own pace.
 // On lighthouse, yellow strikes lightning and orange thickens the rain. The rain rises for a second, holds for a second, and falls for a second. Holding orange keeps the rain thick.
