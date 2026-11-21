@@ -1,13 +1,16 @@
 // Firmware for a Waveshare P2.5 64x64 HUB75 panel on a Pico.
 //
 // Each pattern lives in its own directory and paints the same framebuffer.
-// The encoder click flashes the current name and scrolls the pattern list. A second click selects it.
+// The first encoder click waits. When the wait ends, the current name flashes and the pattern list scrolls.
+// A click while that list is open selects the name.
+// A second click during the wait jumps to settings. Another double click returns to the pattern that was showing.
+// That return lasts until power-off. A turn during the wait opens the list and takes the turn.
 // A step shows the next name at once, even in the middle of that flash.
 // The list ends on RESET?. A click there asks ARE YOU SURE?. Another click clears every pattern's mirrors, slide, turn, and the hue.
 // Outside that mode, the encoder flings the picture sideways, or edits the open setting.
 // Settings is the last pattern. There, blue picks a value and the encoder raises or lowers it.
-// The pattern and the settings are stored in the last flash sector and restored on boot.
-// Pause and speed last until power-off. Each pattern keeps its own turn, sideways slide, and mirrors until then.
+// The pattern and the settings, including the double-click window, are stored in the last flash sector and restored on boot.
+// Pause, speed, and the pattern a double click leaves behind last until power-off. Each pattern keeps its own turn, sideways slide, and mirrors until then.
 // Each pattern starts running at full speed.
 //
 // Wire the panel the way the Waveshare Pico example does.
@@ -42,6 +45,7 @@
 // On lighthouse, ferris wheel, and galaxy, the encoder changes how fast the beam, the wheel, and the disk move. Clockwise is faster. The sea, the rim lights, and the stars keep their own pace.
 // On lighthouse, yellow strikes lightning and orange thickens the rain. The rain rises for a second, holds for a second, and falls for a second. Holding orange keeps the rain thick.
 // On campfire, orange throws sparks and yellow flares the flame. Holding either keeps that going.
+// Green sends one comet across the milky way. A hold keeps a meteor shower along that band, and letting go thins new meteors out over 3 seconds. The picture stays upright.
 // On fireworks, orange launches a small shell and yellow a large one. Shells still launch on their own, at half the earlier pace.
 // On galaxy, tipping the panel tilts the disk. Flat and face up is the resting oval. A steeper tip draws it thinner.
 // On the wide view, tipping the panel looks around the hoops. Flat and face up is the resting view.
@@ -113,10 +117,15 @@ constexpr int OLED_TIMER_DEFAULT = 1;
 constexpr float LINE_TURN_PER_MS = 6.2831853f / 8000.0f;
 constexpr float CIRCLE_GROW_MS = 4000.0f;
 constexpr float CIRCLE_AREA_CAP = 0.40f;
-constexpr int SETTING_COUNT = 7;
+constexpr int SETTING_COUNT = 8;
 constexpr int OLED_BRIGHT_MIN = 5;
 constexpr int ENC_CHOICES[] = {1, 2, 4, 8};
 constexpr int ENC_CHOICE_COUNT = 4;
+constexpr int DBL_MIN_MS = 200;
+constexpr int DBL_MAX_MS = 800;
+constexpr int DBL_STEP_MS = 50;
+constexpr int DBL_DEFAULT_MS = 400;
+constexpr int DBL_CHOICE_COUNT = (DBL_MAX_MS - DBL_MIN_MS) / DBL_STEP_MS + 1;
 
 constexpr int PIN_RED = 19;
 constexpr int PIN_YELLOW = 20;
@@ -127,7 +136,8 @@ constexpr int PIN_ENC_A = 16;
 constexpr int PIN_ENC_B = 17;
 constexpr int PIN_ENC_CLICK = 18;
 constexpr int ENC_DETENT = 4;
-constexpr int CLICK_GAP_MS = 200;
+// Presses closer than this are the same click bouncing.
+constexpr int CLICK_GAP_MS = 40;
 
 // One mechanical detent is four quadrature edges. Positive counts are clockwise.
 constexpr int8_t ENC_TABLE[16] = {
@@ -178,7 +188,8 @@ constexpr uint32_t PATTERN_MAGIC = 0x6d617458;
 constexpr uint32_t PATTERN_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 
 // version 0 is a record from before the settings page. Those boots keep pattern, brightness, and hue.
-constexpr uint32_t PATTERN_VERSION = 5;
+// Version 5 predates the double-click window. Those boots keep the default window.
+constexpr uint32_t PATTERN_VERSION = 6;
 
 struct SavedPattern {
     uint32_t magic;
@@ -192,6 +203,7 @@ struct SavedPattern {
     uint32_t led_timer;
     uint32_t oled_timer;
     uint32_t enc_sens;
+    uint32_t dbl_ms;
 };
 
 struct Settings {
@@ -204,6 +216,7 @@ struct Settings {
     int led_timer;
     int oled_timer;
     int enc;
+    int dbl_ms;
     int cursor;
 };
 
@@ -253,11 +266,12 @@ static SettingRow setting_rows[] = {
     {"MIC SENS:", OledIcon::Mic},
     {"IMU SENS:", OledIcon::Axes},
     {"ENC SENS:", OledIcon::Knob},
+    {"DBL CLICK:", OledIcon::Knob},
     {"LED TIMER:", OledIcon::Hourglass},
     {"OLED TIMER:", OledIcon::Hourglass},
 };
 
-static Settings settings = {0, BRIGHTNESS_PERCENT, 0.0f, 50, 50, 100, LED_TIMER_DEFAULT, OLED_TIMER_DEFAULT, 1, 0};
+static Settings settings = {0, BRIGHTNESS_PERCENT, 0.0f, 50, 50, 100, LED_TIMER_DEFAULT, OLED_TIMER_DEFAULT, 1, DBL_DEFAULT_MS, 0};
 static uint32_t anim_ms = 0;
 static float anim_frac = 0.0f;
 static bool matrix_blank = false;
@@ -287,6 +301,11 @@ static volatile int enc_counts = 0;
 static volatile int enc_state = 0;
 static bool click_down = false;
 static uint32_t click_quiet = 0;
+// The first click is waiting for a second click inside the double-click window.
+static bool click_wait = false;
+static uint32_t click_at = 0;
+// Where a double click into settings returns. A later pattern change drops it. Boot starts with none.
+static int return_pattern = -1;
 
 static bool hue_tap = false;
 static bool hue_spin = false;
@@ -388,7 +407,7 @@ static Settings load_settings() {
     if (saved->version == 0) {
         return loaded;
     }
-    if (saved->version != 1 && saved->version != 2 && saved->version != 3 && saved->version != 4 && saved->version != PATTERN_VERSION) {
+    if (saved->version != 1 && saved->version != 2 && saved->version != 3 && saved->version != 4 && saved->version != 5 && saved->version != PATTERN_VERSION) {
         return loaded;
     }
     if (saved->mic_sens <= 100 && saved->mic_sens % BRIGHTNESS_STEP == 0) {
@@ -412,6 +431,12 @@ static Settings load_settings() {
     }
     if (saved->enc_sens == 1 || saved->enc_sens == 2 || saved->enc_sens == 4 || saved->enc_sens == 8) {
         loaded.enc = (int)saved->enc_sens;
+    }
+    if (saved->version >= 6) {
+        int window = (int)saved->dbl_ms;
+        if (window >= DBL_MIN_MS && window <= DBL_MAX_MS && (window - DBL_MIN_MS) % DBL_STEP_MS == 0) {
+            loaded.dbl_ms = window;
+        }
     }
     return loaded;
 }
@@ -439,6 +464,7 @@ static void program_settings(void *param) {
     saved->led_timer = (uint32_t)incoming->led_timer;
     saved->oled_timer = (uint32_t)incoming->oled_timer;
     saved->enc_sens = (uint32_t)incoming->enc;
+    saved->dbl_ms = (uint32_t)incoming->dbl_ms;
     flash_range_erase(PATTERN_OFFSET, FLASH_SECTOR_SIZE);
     flash_range_program(PATTERN_OFFSET, page, FLASH_PAGE_SIZE);
 }
@@ -654,6 +680,10 @@ static void present_oled(uint32_t now) {
             }
             bar = (choice + 1) / (float)ENC_CHOICE_COUNT;
         } else if (cursor == 5) {
+            snprintf(value, sizeof value, "%dms", settings.dbl_ms);
+            int choice = (settings.dbl_ms - DBL_MIN_MS) / DBL_STEP_MS;
+            bar = (choice + 1) / (float)DBL_CHOICE_COUNT;
+        } else if (cursor == 6) {
             format_timer(value, (int)sizeof value, LED_MINUTES[settings.led_timer]);
             bar = (settings.led_timer + 1) / (float)LED_TIMER_COUNT;
         } else {
@@ -741,6 +771,12 @@ static void commit_pattern(int index) {
     anim_frac = 0.0f;
     reset_play();
     patterns[settings.pattern].start();
+    if (on_campfire()) {
+        view_angle = 0.0f;
+        view_target = 0.0f;
+        view_spinning = false;
+    }
+    return_pattern = -1;
     show_status();
     if (changed) {
         save_settings(settings);
@@ -815,6 +851,12 @@ static bool nudge_setting(int direction, bool store) {
         settings.enc = ENC_CHOICES[next];
         nav_rest = 0;
     } else if (cursor == 5) {
+        int next = settings.dbl_ms + direction * DBL_STEP_MS;
+        if (next < DBL_MIN_MS || next > DBL_MAX_MS) {
+            return false;
+        }
+        settings.dbl_ms = next;
+    } else if (cursor == 6) {
         int next = settings.led_timer + direction;
         if (next < 0 || next >= LED_TIMER_COUNT) {
             return false;
@@ -1573,6 +1615,17 @@ static void poll_button(PanelButton &button, uint32_t now) {
         campfire_flare_held(down);
         return;
     }
+    if (on_campfire() && button.role == ButtonRole::Spin) {
+        if (pressed) {
+            campfire_meteor();
+        }
+        if (released) {
+            campfire_meteor_held(false);
+        } else if (down && (int32_t)(now - button.pressed_at) >= HOLD_MS) {
+            campfire_meteor_held(true);
+        }
+        return;
+    }
     if (on_fireworks() && button.role == ButtonRole::Line) {
         if (pressed) {
             fireworks_launch(false);
@@ -1651,6 +1704,28 @@ static void poll_button(PanelButton &button, uint32_t now) {
     }
 }
 
+static void open_pattern_list() {
+    selecting = true;
+    reset_confirm = false;
+    preview = settings.pattern;
+    select_moved = false;
+    nav_rest = 0;
+    show_status();
+}
+
+static void jump_settings() {
+    if (on_settings()) {
+        if (return_pattern < 0 || return_pattern >= PATTERN_COUNT - 1) {
+            return;
+        }
+        commit_pattern(return_pattern);
+        return;
+    }
+    int from = settings.pattern;
+    commit_pattern(PATTERN_COUNT - 1);
+    return_pattern = from;
+}
+
 static void poll_encoder(uint32_t now) {
     bool down = gpio_get(PIN_ENC_CLICK) == 0;
     bool pressed = down && !click_down;
@@ -1658,31 +1733,41 @@ static void poll_encoder(uint32_t now) {
     if (down) {
         note_activity(now);
     }
-    if (pressed && (int32_t)(now - click_quiet) >= 0) {
+    bool accept = pressed && (int32_t)(now - click_quiet) >= 0;
+    bool in_window = click_wait && (int32_t)(now - click_at) <= settings.dbl_ms;
+    if (accept && !selecting && in_window) {
         click_quiet = now + CLICK_GAP_MS;
         wake_matrix();
-        if (!selecting) {
-            selecting = true;
-            reset_confirm = false;
-            preview = settings.pattern;
-            select_moved = false;
-            nav_rest = 0;
-        } else if (reset_confirm) {
-            selecting = false;
-            reset_confirm = false;
-            nav_rest = 0;
-            clear_view();
-            show_status();
-        } else if (preview == RESET_SLOT) {
-            reset_confirm = true;
-            show_status();
-        } else {
-            selecting = false;
-            nav_rest = 0;
-            if (preview != settings.pattern) {
-                commit_pattern(preview);
-            } else {
+        click_wait = false;
+        jump_settings();
+    } else {
+        if (click_wait && (int32_t)(now - click_at) >= settings.dbl_ms) {
+            click_wait = false;
+            open_pattern_list();
+        }
+        if (accept) {
+            click_quiet = now + CLICK_GAP_MS;
+            wake_matrix();
+            if (!selecting) {
+                click_wait = true;
+                click_at = now;
+            } else if (reset_confirm) {
+                selecting = false;
+                reset_confirm = false;
+                nav_rest = 0;
+                clear_view();
                 show_status();
+            } else if (preview == RESET_SLOT) {
+                reset_confirm = true;
+                show_status();
+            } else {
+                selecting = false;
+                nav_rest = 0;
+                if (preview != settings.pattern) {
+                    commit_pattern(preview);
+                } else {
+                    show_status();
+                }
             }
         }
     }
@@ -1692,6 +1777,10 @@ static void poll_encoder(uint32_t now) {
     }
     note_activity(now);
     wake_matrix();
+    if (click_wait) {
+        click_wait = false;
+        open_pattern_list();
+    }
     if (selecting) {
         int steps = consume_nav(detents);
         if (steps != 0) {
@@ -1830,6 +1919,11 @@ int main() {
         poll_encoder(now);
 
         update_motion(now);
+        if (on_campfire()) {
+            view_angle = 0.0f;
+            view_target = 0.0f;
+            view_spinning = false;
+        }
         update_turn(dt);
         update_shift(dt);
         update_mirror_motion(dt);

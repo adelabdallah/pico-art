@@ -3,6 +3,8 @@
 // https://www.ascii-magic.com/ascii/campfire-under-stars
 
 // Orange throws a shower of sparks. Yellow flares the flame. Holding either keeps that going.
+// Green sends one comet across the milky way. A hold keeps a meteor shower along that band.
+// Letting go spends 3 seconds thinning out new meteors. Each one already in the sky finishes its crossing.
 
 #include "pattern.hpp"
 #include "noise.hpp"
@@ -31,6 +33,25 @@ struct Burst {
     bool on;
 };
 
+// The milky way ridge is y = 0.42x - 4, the same line the sky dust uses.
+constexpr int METEOR_CAP = 20;
+constexpr int METEOR_TAIL = 8;
+constexpr int METEOR_FADE_MS = 3000;
+constexpr float METEOR_EVERY_MS = 85.0f;
+constexpr float BAND_SLOPE = 0.42f;
+constexpr float BAND_LIFT = -4.0f;
+
+struct Meteor {
+    float x[METEOR_TAIL];
+    float y[METEOR_TAIL];
+    float vx;
+    float vy;
+    float wobble;
+    float wobble_rate;
+    float wobble_amp;
+    bool on;
+};
+
 static int tree_top[PANEL_WIDTH];
 static Spark sparks[24];
 static Burst bursts[40];
@@ -43,6 +64,10 @@ static bool shower_held = false;
 static bool flare_held = false;
 static int flare_phase = 0;
 static int flare_ms = 0;
+static Meteor meteors[METEOR_CAP];
+static bool meteor_held = false;
+static int meteor_fade_ms = -1;
+static float meteor_wait_ms = 0.0f;
 
 static float rnd() {
     rng_state = rng_state * 1664525u + 1013904223u;
@@ -274,6 +299,124 @@ static void paint_bursts(uint8_t *frame, int dt_ms) {
     }
 }
 
+static bool spawn_meteor() {
+    int slot = -1;
+    for (int i = 0; i < METEOR_CAP; ++i) {
+        if (!meteors[i].on) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        return false;
+    }
+    float slope = BAND_SLOPE + (rnd() - 0.5f) * 0.36f;
+    float speed = 32.0f + rnd() * 26.0f;
+    float span = sqrtf(1.0f + slope * slope);
+    Meteor &meteor = meteors[slot];
+    meteor.on = true;
+    meteor.vx = speed / span;
+    meteor.vy = speed * slope / span;
+    meteor.wobble = rnd() * TAU;
+    meteor.wobble_rate = 1.6f + rnd() * 3.4f;
+    meteor.wobble_amp = 5.0f + rnd() * 11.0f;
+    float head_x = -8.0f + rnd() * 30.0f;
+    float head_y = BAND_SLOPE * head_x + BAND_LIFT + (rnd() - 0.5f) * 14.0f;
+    float ux = meteor.vx / speed;
+    float uy = meteor.vy / speed;
+    for (int i = 0; i < METEOR_TAIL; ++i) {
+        meteor.x[i] = head_x - ux * i * 1.8f;
+        meteor.y[i] = head_y - uy * i * 1.8f;
+    }
+    return true;
+}
+
+static void meteor_colour(float along, int &red, int &green, int &blue) {
+    float glow = along * along;
+    red = (int)(36.0f + glow * 219.0f);
+    green = (int)(64.0f + glow * 191.0f);
+    blue = (int)(120.0f + glow * 135.0f);
+}
+
+static void paint_meteors(uint8_t *frame, int dt_ms) {
+    if (dt_ms < 0) {
+        dt_ms = 0;
+    }
+    float rate = 0.0f;
+    bool fade_done = false;
+    if (meteor_held) {
+        rate = 1.0f;
+    } else if (meteor_fade_ms >= 0) {
+        rate = 1.0f - (float)meteor_fade_ms / (float)METEOR_FADE_MS;
+        if (rate < 0.0f) {
+            rate = 0.0f;
+        }
+        meteor_fade_ms += dt_ms;
+        if (meteor_fade_ms >= METEOR_FADE_MS) {
+            meteor_fade_ms = -1;
+            fade_done = true;
+        }
+    }
+    if (rate > 0.0f) {
+        meteor_wait_ms += (float)dt_ms * rate;
+        int guard = 0;
+        while (meteor_wait_ms >= METEOR_EVERY_MS && guard < METEOR_CAP) {
+            if (!spawn_meteor()) {
+                meteor_wait_ms = METEOR_EVERY_MS;
+                break;
+            }
+            meteor_wait_ms -= METEOR_EVERY_MS;
+            guard += 1;
+        }
+    }
+    if (fade_done) {
+        meteor_wait_ms = 0.0f;
+    }
+    float step = dt_ms * 0.001f;
+    for (int i = 0; i < METEOR_CAP; ++i) {
+        Meteor &meteor = meteors[i];
+        if (!meteor.on) {
+            continue;
+        }
+        float speed = sqrtf(meteor.vx * meteor.vx + meteor.vy * meteor.vy);
+        float sway = 0.0f;
+        float side_x = 0.0f;
+        float side_y = 0.0f;
+        if (speed > 0.001f) {
+            side_x = -meteor.vy / speed;
+            side_y = meteor.vx / speed;
+            sway = sinf(meteor.wobble) * meteor.wobble_amp;
+        }
+        if (step > 0.0f) {
+            float next_x = meteor.x[0] + (meteor.vx + side_x * sway) * step;
+            float next_y = meteor.y[0] + (meteor.vy + side_y * sway) * step;
+            meteor.wobble += meteor.wobble_rate * step;
+            for (int tail = METEOR_TAIL - 1; tail > 0; --tail) {
+                meteor.x[tail] = meteor.x[tail - 1];
+                meteor.y[tail] = meteor.y[tail - 1];
+            }
+            meteor.x[0] = next_x;
+            meteor.y[0] = next_y;
+        }
+        for (int tail = METEOR_TAIL - 1; tail >= 0; --tail) {
+            int px = (int)lroundf(meteor.x[tail]);
+            int py = (int)lroundf(meteor.y[tail]);
+            if (py < 0 || py >= HORIZON) {
+                continue;
+            }
+            float along = 1.0f - (float)tail / (float)(METEOR_TAIL - 1);
+            int red;
+            int green;
+            int blue;
+            meteor_colour(along, red, green, blue);
+            put(frame, px, py, red, green, blue);
+        }
+        if (meteor.x[METEOR_TAIL - 1] > PANEL_WIDTH + 1.0f || meteor.y[METEOR_TAIL - 1] > HORIZON + 1.0f || meteor.x[0] < -24.0f) {
+            meteor.on = false;
+        }
+    }
+}
+
 }  // namespace
 
 void campfire_start() {
@@ -302,6 +445,12 @@ void campfire_start() {
     flare_held = false;
     flare_phase = 0;
     flare_ms = 0;
+    for (int i = 0; i < METEOR_CAP; ++i) {
+        meteors[i].on = false;
+    }
+    meteor_held = false;
+    meteor_fade_ms = -1;
+    meteor_wait_ms = 0.0f;
 }
 
 void campfire_spark_burst() {
@@ -327,6 +476,25 @@ void campfire_flare_press() {
 
 void campfire_flare_held(bool held) {
     flare_held = held;
+}
+
+void campfire_meteor() {
+    spawn_meteor();
+}
+
+void campfire_meteor_held(bool held) {
+    if (held) {
+        if (!meteor_held) {
+            meteor_wait_ms = 0.0f;
+        }
+        meteor_held = true;
+        meteor_fade_ms = -1;
+        return;
+    }
+    if (meteor_held) {
+        meteor_held = false;
+        meteor_fade_ms = 0;
+    }
 }
 
 void campfire_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
@@ -359,6 +527,7 @@ void campfire_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
             put(frame, star_x[i], star_y[i], level, level, (int)(level * 0.9f + 20));
         }
     }
+    paint_meteors(frame, dt_ms);
     for (int x = 0; x < PANEL_WIDTH; ++x) {
         for (int y = tree_top[x]; y < HORIZON + 1; ++y) {
             put(frame, x, y, 3, 6, 8);

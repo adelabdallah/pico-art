@@ -193,6 +193,8 @@ void campfire_spark_burst();
 void campfire_shower(bool held);
 void campfire_flare_press();
 void campfire_flare_held(bool held);
+void campfire_meteor();
+void campfire_meteor_held(bool held);
 
 void skyline_start();
 void skyline_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);

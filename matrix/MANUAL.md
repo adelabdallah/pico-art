@@ -60,9 +60,9 @@ Any button, the encoder click, and a turn of the encoder wake the panel and the 
 
 ## What is remembered
 
-The last flash sector stores the pattern, the panel brightness, the hue, the microphone sensitivity, the tilt sensitivity, the OLED contrast, both timers, and the encoder sensitivity.
+The last flash sector stores the pattern, the panel brightness, the hue, the microphone sensitivity, the tilt sensitivity, the OLED contrast, both timers, the encoder sensitivity, and the double-click window.
 
-Pause, each pattern's turn, each pattern's sideways slide, and each pattern's mirrors last until power-off. They clear on reboot. Hue is one of the stored settings, so it comes back.
+Pause, each pattern's turn, each pattern's sideways slide, each pattern's mirrors, and the pattern a double click leaves behind last until power-off. They clear on reboot. Hue is one of the stored settings, so it comes back.
 
 The panel timer choices are 1, 2, 5, 10, 15, 30, and 60 minutes, then a forever entry. Forever is the default, shown as `~`. The OLED timer choices are the same minutes with no forever entry. The default is 2 minutes. The dimmest OLED contrast is 5 percent.
 
@@ -72,7 +72,8 @@ These apply on every pattern except where a later section names a different acti
 
 | Control | Action |
 | --- | --- |
-| Encoder click | Opens the pattern list. The OLED flashes the current name. A turn moves through the names, and the next name shows at once. A second click selects the name under the flash. The list ends on `RESET?`. A click there asks `ARE YOU SURE?`. Another click clears every pattern's mirrors, slide, and turn, and clears the hue. |
+| Encoder click | Waits for a second click. When the wait ends, the pattern list opens and the OLED flashes the current name. A turn moves through the names, and the next name shows at once. A click while the list is open selects the name under the flash. The list ends on `RESET?`. A click there asks `ARE YOU SURE?`. Another click clears every pattern's mirrors, slide, and turn, and clears the hue. A turn during the wait opens the list and takes the turn. |
+| Encoder double click | Jumps to settings. Another double click returns to the pattern that was showing. That return lasts until power-off. On settings, with no pattern waiting, the double click stays on settings. |
 | Encoder turn | Flings the picture sideways. The fling coasts and then stops. |
 | Red | Eases the picture to a stop, or back to full speed, over about two seconds. A stopped picture pulses. |
 | Orange | Adds a diagonal mirror to the current pattern. The sixth press clears that pattern's lines. A line runs near a corner-to-corner diagonal and misses the centre. The smaller side shows the other side reflected. Holding orange turns that new line about the centre until it is released. |
@@ -132,7 +133,7 @@ On the wide view, tipping the panel looks around the hoops. Flat and face up is 
 
 ### Campfire
 
-Orange throws sparks. Yellow flares the flame. Holding either keeps that going. Red, green, blue, and the encoder keep their shared actions.
+Orange throws sparks. Yellow flares the flame. Holding either keeps that going. Green sends one comet across the milky way. Holding green keeps a meteor shower along that band, and each meteor wanders a little on its own path. At most 20 are in the sky at once. Letting go thins new meteors out over 3 seconds, and each one already crossing finishes its path. The campfire picture stays upright. Red, blue, and the encoder keep their shared actions.
 
 ### Skyline
 
@@ -160,7 +161,7 @@ Tipping the panel tilts the disk. Flat and face up is the resting oval. A steepe
 
 ### Settings
 
-Blue moves to the next value. The encoder raises or lowers the open value. Orange and yellow stay quiet. Red still pauses. Green still turns the picture.
+Blue moves to the next value. The encoder raises or lowers the open value. A double click returns to the pattern that was showing when a double click opened settings. With no pattern waiting, it stays on settings. Orange and yellow stay quiet. Red still pauses. Green still turns the picture.
 
 The values, in order:
 
@@ -171,6 +172,7 @@ The values, in order:
 | Microphone sensitivity | 0 to 100 percent, in steps of 5 | 50 percent |
 | Tilt sensitivity | 0 to 100 percent, in steps of 5 | 50 percent |
 | Encoder sensitivity | 1, 2, 4, or 8 detents per step on the list, the settings, and the pattern-specific encoder actions | 1 |
+| Double click | 200 to 800 milliseconds, in steps of 50 | 400 milliseconds |
 | Panel timer | 1, 2, 5, 10, 15, 30, 60 minutes, or forever | Forever |
 | OLED timer | 1, 2, 5, 10, 15, 30, or 60 minutes | 2 minutes |
 
