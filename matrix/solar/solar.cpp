@@ -1,7 +1,9 @@
 // An orrery on the wide view, and a close portrait of each world.
 // Each orbit is its own hoop, leaned so the paths cross in front of and behind each other.
 // Tipping the panel looks around that model. Flat, face up, is the resting view.
-// The encoder walks the stops. Red flings the portrait's spin, or the whole orrery on the wide view.
+// The encoder walks the stops. Green flings the portrait's spin, or the whole orrery on the wide view.
+// Orange returns to the orrery, and from there the view pulls back into the galaxy.
+// Yellow tours the stops. Each one holds for 5 seconds while the view tumbles.
 // Orbit spacing is even so the rings stay apart. Periods follow the real order, with the outer worlds compressed into a few minutes.
 // Each portrait keeps one landmark large enough to name the body, and smaller marks around it.
 // The sun's corona carries streamers, and flares that rise and fade at new angles around the limb.
@@ -42,6 +44,7 @@ constexpr float SPIN_HOLD = 3.14159265f;
 constexpr float ORRERY_HOLD = 0.78539816f;
 constexpr float SPIN_KICK = 2.2f;
 constexpr float ORRERY_KICK = 0.85f;
+constexpr float TOUR_DWELL_S = 5.0f;
 constexpr int WIDE_STARS = 36;
 constexpr int PORTRAIT_STARS = 24;
 constexpr int BELT_DOTS = 32;
@@ -232,7 +235,14 @@ static float shown = 1.0f;
 static float shown_v = 0.0f;
 static float zoom = 0.0f;
 static float zoom_v = 0.0f;
-static bool red_held = false;
+static bool spin_held = false;
+static bool touring = false;
+static bool tour_wait = true;
+static float tour_left = TOUR_DWELL_S;
+static float tour_time = 0.0f;
+static float tour_blend = 0.0f;
+static float cam_roll = 0.0f;
+static bool ready = false;
 static float orrery_vel = 0.0f;
 static float spin_angle[STOP_COUNT];
 static float spin_vel[STOP_COUNT];
@@ -967,32 +977,45 @@ static void draw_orrery(uint8_t *frame, uint32_t anim_ms, float zoom_now, float 
     paint_marks(frame);
 }
 
+// Three rates that do not share a period, so the tumble keeps changing.
+static void gyro_aim(float time, float &yaw, float &pitch, float &roll) {
+    yaw = 0.70f * sinf(time * 0.35f);
+    pitch = CAM_PITCH + 0.45f * sinf(time * 0.22f + 1.1f);
+    roll = 0.55f * sinf(time * 0.17f + 0.7f);
+}
+
 static void follow_hand(float dt) {
+    float tour_goal = touring ? 1.0f : 0.0f;
+    tour_blend += (tour_goal - tour_blend) * (1.0f - expf(-dt * 3.0f));
+    float blend = 1.0f - expf(-dt * 7.0f);
     float gx = 0.0f;
     float gy = 0.0f;
     float gz = 0.0f;
-    if (!environment_gravity(gx, gy, gz)) {
-        return;
+    if (environment_gravity(gx, gy, gz)) {
+        float gain = environment_imu_gain();
+        float horiz = sqrtf(gx * gx + gy * gy);
+        float tip = atan2f(horiz, fabsf(gz)) * gain;
+        if (tip > 1.25f) {
+            tip = 1.25f;
+        }
+        float goal_pitch = CAM_PITCH - tip * 0.80f;
+        cam_pitch += (goal_pitch - cam_pitch) * blend;
+        if (gain <= 0.0f) {
+            cam_yaw = wrap_pi(cam_yaw * (1.0f - blend));
+        } else if (horiz > 0.18f) {
+            float heading = atan2f(gy, gx);
+            float turn = wrap_pi(heading - cam_yaw);
+            float follow = clampf((horiz - 0.18f) / 0.35f, 0.0f, 1.0f) * clampf(gain, 0.0f, 1.0f);
+            cam_yaw = wrap_pi(cam_yaw + turn * blend * follow);
+        }
     }
-    float gain = environment_imu_gain();
-    float horiz = sqrtf(gx * gx + gy * gy);
-    float tip = atan2f(horiz, fabsf(gz)) * gain;
-    if (tip > 1.25f) {
-        tip = 1.25f;
-    }
-    float goal_pitch = CAM_PITCH - tip * 0.80f;
-    float blend = 1.0f - expf(-dt * 7.0f);
-    cam_pitch += (goal_pitch - cam_pitch) * blend;
-    if (gain <= 0.0f) {
-        cam_yaw = wrap_pi(cam_yaw * (1.0f - blend));
-        return;
-    }
-    if (horiz > 0.18f) {
-        float heading = atan2f(gy, gx);
-        float turn = wrap_pi(heading - cam_yaw);
-        float follow = clampf((horiz - 0.18f) / 0.35f, 0.0f, 1.0f) * clampf(gain, 0.0f, 1.0f);
-        cam_yaw = wrap_pi(cam_yaw + turn * blend * follow);
-    }
+    float gyro_yaw;
+    float gyro_pitch;
+    float gyro_roll;
+    gyro_aim(tour_time, gyro_yaw, gyro_pitch, gyro_roll);
+    cam_pitch += (gyro_pitch - cam_pitch) * tour_blend;
+    cam_yaw = wrap_pi(cam_yaw + wrap_pi(gyro_yaw - cam_yaw) * tour_blend);
+    cam_roll += (gyro_roll * tour_blend - cam_roll) * blend;
 }
 
 static bool saturn_ring(float x, float y, float radius, bool &gap, float &shine) {
@@ -1323,9 +1346,9 @@ static void draw_belt(uint8_t *frame, float body_cx, float body_cy, float roll, 
     }
 }
 
-static void draw_portrait(uint8_t *frame, int stop, float offset, float alpha, float roll, uint32_t anim_ms) {
+static void draw_portrait(uint8_t *frame, int stop, float offset, float lift, float alpha, float roll, uint32_t anim_ms) {
     float body_cx = CX + offset;
-    float body_cy = CY;
+    float body_cy = CY + lift;
     if (stop == STOP_BELT) {
         draw_belt(frame, body_cx, body_cy, roll, alpha, anim_ms);
         return;
@@ -1339,17 +1362,24 @@ static void draw_portrait(uint8_t *frame, int stop, float offset, float alpha, f
 }
 
 static void draw_portraits(uint8_t *frame, float alpha, float roll, uint32_t anim_ms) {
+    float yaw;
+    float pitch;
+    float gyro_roll;
+    gyro_aim(tour_time, yaw, pitch, gyro_roll);
+    float drift_x = yaw * tour_blend * 8.0f;
+    float drift_y = (pitch - CAM_PITCH) * tour_blend * 8.0f;
+    (void)gyro_roll;
     int i0 = (int)floorf(shown);
     for (int step = 0; step < 2; ++step) {
         int stop = i0 + step;
         if (stop < STOP_SUN || stop > STOP_PLUTO) {
             continue;
         }
-        float offset = ((float)stop - shown) * (float)PANEL_WIDTH;
+        float offset = ((float)stop - shown) * (float)PANEL_WIDTH + drift_x;
         if (offset > 78.0f || offset < -78.0f) {
             continue;
         }
-        draw_portrait(frame, stop, offset, alpha, roll, anim_ms);
+        draw_portrait(frame, stop, offset, drift_y, alpha, roll, anim_ms);
     }
 }
 
@@ -1371,14 +1401,58 @@ static bool passes_wide(int from, int steps) {
     return false;
 }
 
+static void turn_stops(int steps);
+
+static void step_tour(float dt) {
+    if (!touring) {
+        return;
+    }
+    tour_time += dt;
+    float shown_goal = target == STOP_WIDE ? (float)depart : (float)target;
+    float zoom_goal = target == STOP_WIDE ? 0.0f : 1.0f;
+    float shown_gap = shown - shown_goal;
+    if (shown_gap < 0.0f) {
+        shown_gap = -shown_gap;
+    }
+    float zoom_gap = zoom - zoom_goal;
+    if (zoom_gap < 0.0f) {
+        zoom_gap = -zoom_gap;
+    }
+    float shown_speed = shown_v < 0.0f ? -shown_v : shown_v;
+    float zoom_speed = zoom_v < 0.0f ? -zoom_v : zoom_v;
+    if (shown_gap > 0.05f || zoom_gap > 0.05f || shown_speed > 0.2f || zoom_speed > 0.2f) {
+        tour_wait = true;
+        return;
+    }
+    if (tour_wait) {
+        tour_wait = false;
+        tour_left = TOUR_DWELL_S;
+    }
+    tour_left -= dt;
+    if (tour_left > 0.0f) {
+        return;
+    }
+    tour_wait = true;
+    turn_stops(1);
+}
+
 static void step_motion(float dt) {
-    if (red_held) {
-        if (target == STOP_WIDE) {
-            if (orrery_vel < ORRERY_HOLD) {
-                orrery_vel = ORRERY_HOLD;
-            }
-        } else if (spin_vel[target] < SPIN_HOLD) {
+    bool hold = spin_held || touring;
+    if (hold && (target == STOP_WIDE || touring)) {
+        if (orrery_vel < ORRERY_HOLD) {
+            orrery_vel = ORRERY_HOLD;
+        }
+    }
+    if (spin_held && target > STOP_WIDE && target < STOP_COUNT) {
+        if (spin_vel[target] < SPIN_HOLD) {
             spin_vel[target] = SPIN_HOLD;
+        }
+    }
+    if (touring) {
+        for (int stop = STOP_SUN; stop <= STOP_PLUTO; ++stop) {
+            if (spin_vel[stop] < SPIN_HOLD) {
+                spin_vel[stop] = SPIN_HOLD;
+            }
         }
     }
     float shown_goal = target == STOP_WIDE ? (float)depart : (float)target;
@@ -1413,15 +1487,16 @@ static void step_motion(float dt) {
     for (int i = 0; i < MOON_COUNT; ++i) {
         moon_angle[i] = wrap_tau(moon_angle[i] + TWO_PI / MOONS[i].period * dt);
     }
-    if (!(red_held && target == STOP_WIDE)) {
+    if (!(hold && (target == STOP_WIDE || touring))) {
         orrery_vel *= expf(-dt / 2.0f);
     }
     for (int stop = STOP_SUN; stop <= STOP_PLUTO; ++stop) {
-        if (red_held && target == stop) {
+        if (touring || (spin_held && target == stop)) {
             continue;
         }
         spin_vel[stop] *= expf(-dt / 0.45f);
     }
+    step_tour(dt);
 }
 
 static void advance(int dt_ms) {
@@ -1505,7 +1580,13 @@ static void reset_motion() {
     shown_v = 0.0f;
     zoom = 0.0f;
     zoom_v = 0.0f;
-    red_held = false;
+    spin_held = false;
+    touring = false;
+    tour_wait = true;
+    tour_left = TOUR_DWELL_S;
+    tour_time = 0.0f;
+    tour_blend = 0.0f;
+    cam_roll = 0.0f;
     orrery_vel = 0.0f;
     cam_pitch = CAM_PITCH;
     cam_yaw = 0.0f;
@@ -1527,15 +1608,31 @@ static void reset_motion() {
 
 void solar_start() {
     reset_motion();
+    ready = true;
 }
 
-void solar_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
+void solar_ensure() {
+    if (!ready) {
+        solar_start();
+    }
+}
+
+void solar_step(int dt_ms) {
     advance(dt_ms);
     step_flares(dt_ms * 0.001f);
     follow_hand(dt_ms * 0.001f);
+}
+
+void solar_paint_wide(uint8_t *frame, uint32_t anim_ms) {
+    std::memset(frame, 0, PANEL_PIXELS * 3);
+    draw_orrery(frame, anim_ms, 0.0f, cam_roll, 1.0f);
+}
+
+void solar_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
+    solar_step(dt_ms);
     std::memset(frame, 0, PANEL_PIXELS * 3);
     float draw_zoom = clampf(zoom, 0.0f, 1.0f);
-    float roll = sinf(draw_zoom * PI) * 0.21f;
+    float roll = sinf(draw_zoom * PI) * 0.21f + cam_roll;
     float orrery_alpha = 1.0f - smooth_unit(0.28f, 0.88f, draw_zoom);
     float portrait_alpha = smooth_unit(0.42f, 0.95f, draw_zoom);
     if (orrery_alpha > 0.02f) {
@@ -1546,11 +1643,45 @@ void solar_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     }
 }
 
+bool solar_orrery_ready() {
+    float depth = zoom < 0.0f ? -zoom : zoom;
+    float speed = zoom_v < 0.0f ? -zoom_v : zoom_v;
+    return target == STOP_WIDE && depth < 0.06f && speed < 0.35f;
+}
+
+void solar_show_orrery() {
+    if (target == STOP_WIDE) {
+        return;
+    }
+    turn_stops(STOP_COUNT - target);
+}
+
+bool solar_touring() {
+    return touring;
+}
+
+void solar_tour_stop() {
+    touring = false;
+}
+
+void solar_tour_toggle() {
+    if (touring) {
+        touring = false;
+        return;
+    }
+    touring = true;
+    tour_wait = true;
+    if (target != STOP_WIDE) {
+        turn_stops(STOP_COUNT - target);
+    }
+}
+
 void solar_turn(int steps) {
+    touring = false;
     turn_stops(steps);
 }
 
-void solar_red_tap() {
+void solar_spin_tap() {
     if (target == STOP_WIDE) {
         orrery_vel += ORRERY_KICK;
     } else if (target > STOP_WIDE && target < STOP_COUNT) {
@@ -1558,10 +1689,10 @@ void solar_red_tap() {
     }
 }
 
-void solar_red_hold() {
-    red_held = true;
+void solar_spin_hold() {
+    spin_held = true;
 }
 
-void solar_red_release() {
-    red_held = false;
+void solar_spin_release() {
+    spin_held = false;
 }

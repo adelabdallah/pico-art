@@ -108,7 +108,7 @@ Plasma is 1. Settings and the reset prompts have no number. The yellow band show
 | 17 | ferris wheel | A lit wheel turning at dusk, with gondolas that stay upright. |
 | 18 | aurora | Three curtains, green, teal, and rose, swaying over a dark hill. |
 | 19 | fireworks | Rockets climb over a night skyline and burst into coloured shells. Shells also launch on their own. |
-| 20 | galaxy | A tilted spiral, warm at the core and blue along two arms. |
+| 20 | galaxy | A tilted spiral, warm at the core and blue along two arms. The solar system sits on the outer tip of one arm. |
 |  | settings | Three gears. Blue picks a stored value and the encoder raises or lowers it. |
 
 Plasma, warp, feedback, metaballs, reaction, life, flow field, voronoi cells, loop, pipes, reef, and aurora use the shared controls only.
@@ -123,13 +123,19 @@ Tilt pours the pool. Flat and face up holds the pool in the middle. Microphone s
 
 ### Solar
 
-The encoder walks from the wide view through each world and back.
+The encoder walks from the wide view through each world and back. A turn while the tour is running stops the tour.
 
-Red flings the current world's spin, or the whole orrery on the wide view. Holding red keeps that spin going. While the pattern list is open, red goes back to pause.
+Red pauses, the same as on the other patterns. While the pattern list is open, the buttons keep their shared actions.
 
-Green, blue, orange, and yellow keep their shared actions.
+Green flings the current world's spin, or the whole orrery on the wide view. Holding green keeps that spin going.
 
-On the wide view, tipping the panel looks around the hoops. Flat and face up is the resting view.
+Orange steps outward. On a world, it returns to the wide orrery. On the wide orrery, it pulls back over about two seconds until the system sits on the outer tip of one spiral arm, and the pattern becomes galaxy when the picture arrives. A second press during that flight turns it around and brings it back along the same path.
+
+Yellow starts a tour. The wide view, the sun, each planet, the belt, and Pluto each hold for 5 seconds, and then the tour repeats. The orrery and the worlds spin as if green is held, and pitch, yaw, and roll tumble together. Another press stops the tour. While it runs, a play mark bobs in the bottom right of the OLED.
+
+Blue keeps the shared hue shift.
+
+On the wide view, tipping the panel looks around the hoops. Flat and face up is the resting view. During the tour the tumble replaces that look until the tour stops.
 
 ### Campfire
 
@@ -155,7 +161,13 @@ Orange launches a small shell. Yellow launches a large one. Red, green, blue, an
 
 ### Galaxy
 
-The encoder changes how fast the disk moves. Clockwise is faster. The stars keep their own pace. The buttons keep their shared actions.
+The encoder changes how fast the disk moves. Clockwise is faster. The stars keep their own pace.
+
+Orange flies in along the arm to the solar system. The pattern becomes solar, on the wide orrery, when the picture arrives. A second press during that flight turns it around and brings it back along the same path.
+
+The solar system sits on the outer tip of one arm and turns with the disk.
+
+Red, yellow, green, and blue keep their shared actions.
 
 Tipping the panel tilts the disk. Flat and face up is the resting oval. A steeper tip draws it thinner.
 

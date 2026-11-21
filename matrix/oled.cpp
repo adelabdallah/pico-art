@@ -600,6 +600,18 @@ static void draw_value_bar(float bar) {
     }
 }
 
+static void draw_play(uint32_t now_ms) {
+    float bob = sinf(now_ms * 0.004f) * 2.0f;
+    int top = 52 + (int)bob;
+    int left = 118;
+    for (int row = 0; row < 7; ++row) {
+        int span = row < 4 ? row + 1 : 7 - row;
+        for (int col = 0; col < span; ++col) {
+            set_pixel(left + col, top + row);
+        }
+    }
+}
+
 static bool present() {
     if (!flush()) {
         ready = false;
@@ -624,7 +636,7 @@ static bool title_off(uint32_t now_ms, bool flash) {
     return ((now_ms / 280) & 1u) == 1u;
 }
 
-void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count, bool flash, const OledScene &scene, int number) {
+void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count, bool flash, const OledScene &scene, int number, bool play) {
     if (!ready || !awake) {
         return;
     }
@@ -639,6 +651,9 @@ void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, i
         draw_waves(now_ms, squeeze);
         draw_mirror_marks(now_ms, squeeze, scene.lines, scene.circles);
         rotate_blue(scene.turn);
+    }
+    if (play) {
+        draw_play(now_ms);
     }
     present();
 }

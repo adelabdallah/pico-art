@@ -40,13 +40,16 @@
 // Blue GP22 shifts the hue by a fifth of a turn, and a hold spins it, except on settings.
 // On liquid, yellow starts and stops the microphone. Listening starts on. Orange still adds a diagonal there.
 // On settings, blue moves to the next value. Elsewhere blue shifts the hue. Orange and yellow stay quiet there.
-// On solar, the encoder walks from the wide view through each world and back. Red flings that world's spin, or the whole orrery on the wide view.
+// On solar, the encoder walks from the wide view through each world and back. Green flings that world's spin, or the whole orrery on the wide view. A hold keeps the spin going.
+// Orange on a world returns to the orrery. Orange on the orrery pulls back over about two seconds to the galaxy, and the pattern changes when the picture arrives. A second press during the flight turns it around.
+// Yellow tours the orrery and each world, holding each for 5 seconds, with the spin held and the view tumbling. Another press stops the tour. A play mark bobs on the OLED while it runs.
 // On skyline, orange moves the view up and yellow moves it down. The encoder moves the view left and right, and the view stops at the edge of the harbour.
 // On lighthouse, ferris wheel, and galaxy, the encoder changes how fast the beam, the wheel, and the disk move. Clockwise is faster. The sea, the rim lights, and the stars keep their own pace.
 // On lighthouse, yellow strikes lightning and orange thickens the rain. The rain rises for a second, holds for a second, and falls for a second. Holding orange keeps the rain thick.
 // On campfire, orange throws sparks and yellow flares the flame. Holding either keeps that going.
 // Green sends one comet across the milky way. A hold keeps a meteor shower along that band, and letting go thins new meteors out over 3 seconds. The picture stays upright.
 // On fireworks, orange launches a small shell and yellow a large one. Shells still launch on their own, at half the earlier pace.
+// On galaxy, orange flies in to the solar orrery along the same path. The solar system sits on the outer tip of one arm.
 // On galaxy, tipping the panel tilts the disk. Flat and face up is the resting oval. A steeper tip draws it thinner.
 // On the wide view, tipping the panel looks around the hoops. Flat and face up is the resting view.
 // The mirrors clear on reboot.
@@ -77,6 +80,10 @@
 #include "pattern.hpp"
 
 constexpr int FRAME_MS = 40;
+constexpr int FLIGHT_MS = 2000;
+constexpr float CLOSE_SCALE = 18.0f;
+constexpr float PANEL_CX = (PANEL_WIDTH - 1) * 0.5f;
+constexpr float PANEL_CY = (PANEL_HEIGHT - 1) * 0.5f;
 constexpr int DT_CAP_MS = 200;
 constexpr int HOLD_MS = 320;
 constexpr int MIRROR_LINE_CAP = 5;
@@ -291,6 +298,9 @@ static BurstPhase burst = BurstPhase::Idle;
 static uint32_t burst_at = 0;
 static float shift_x = 0.0f;
 static float shift_v = 0.0f;
+// 0 is the solar orrery filling the view. 1 is the galaxy, with the system on an arm.
+static float flight = 0.0f;
+static int flight_dir = 0;
 static bool selecting = false;
 static bool select_moved = false;
 static bool oled_now = false;
@@ -723,7 +733,8 @@ static void present_oled(uint32_t now) {
     scene.circles = mirrors[settings.pattern].circles;
     scene.turn = view_angle;
     scene.slide = speed / (speed + 80.0f);
-    oled_show_pattern(title, now, nullptr, 0, browsing || reset_confirm, scene, number);
+    bool play = on_solar() && !browsing && !reset_confirm && solar_touring();
+    oled_show_pattern(title, now, nullptr, 0, browsing || reset_confirm, scene, number, play);
 }
 
 static void show_status() {
@@ -756,6 +767,7 @@ static void load_view(int index) {
 }
 
 static void commit_pattern(int index) {
+    flight_dir = 0;
     if (index < 0) {
         index = PATTERN_COUNT - 1;
     } else if (index >= PATTERN_COUNT) {
@@ -1528,6 +1540,36 @@ static void setup_encoder() {
     gpio_set_irq_enabled(PIN_ENC_B, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
 }
 
+static void cosmos_orange() {
+    if (flight_dir != 0) {
+        flight_dir = -flight_dir;
+        return;
+    }
+    bool tour = solar_touring();
+    if (on_solar()) {
+        if (!solar_orrery_ready()) {
+            solar_show_orrery();
+            solar_tour_stop();
+            if (tour) {
+                show_status();
+            }
+            return;
+        }
+        solar_tour_stop();
+        galaxy_ensure();
+        flight = 0.0f;
+        flight_dir = 1;
+        if (tour) {
+            show_status();
+        }
+        return;
+    }
+    solar_ensure();
+    galaxy_ensure();
+    flight = 1.0f;
+    flight_dir = -1;
+}
+
 static void setup_buttons() {
     for (int i = 0; i < BUTTON_COUNT; ++i) {
         gpio_init(buttons[i].gpio);
@@ -1550,17 +1592,6 @@ static void poll_button(PanelButton &button, uint32_t now) {
         wake_matrix();
     }
     if (button.role == ButtonRole::Pause) {
-        if (on_solar() && !selecting) {
-            if (pressed) {
-                solar_red_tap();
-            }
-            if (released) {
-                solar_red_release();
-            } else if (down && (int32_t)(now - button.pressed_at) >= HOLD_MS) {
-                solar_red_hold();
-            }
-            return;
-        }
         if (pressed) {
             if (play_speed <= 0.001f) {
                 play_speed = 1.0f;
@@ -1638,6 +1669,19 @@ static void poll_button(PanelButton &button, uint32_t now) {
         }
         return;
     }
+    if (!selecting && button.role == ButtonRole::Line && (on_solar() || on_galaxy())) {
+        if (pressed) {
+            cosmos_orange();
+        }
+        return;
+    }
+    if (!selecting && on_solar() && button.role == ButtonRole::Circle) {
+        if (pressed && flight_dir == 0) {
+            solar_tour_toggle();
+            show_status();
+        }
+        return;
+    }
     if (button.role == ButtonRole::Line || button.role == ButtonRole::Circle) {
         if (pressed && on_settings()) {
             if (button.role == ButtonRole::Line) {
@@ -1675,6 +1719,17 @@ static void poll_button(PanelButton &button, uint32_t now) {
         return;
     }
     if (button.role == ButtonRole::Spin) {
+        if (on_solar() && !selecting) {
+            if (pressed) {
+                solar_spin_tap();
+            }
+            if (released) {
+                solar_spin_release();
+            } else if (down && (int32_t)(now - button.pressed_at) >= HOLD_MS) {
+                solar_spin_hold();
+            }
+            return;
+        }
         if (pressed) {
             nudge_turn();
         }
@@ -1704,7 +1759,30 @@ static void poll_button(PanelButton &button, uint32_t now) {
     }
 }
 
+static int find_pattern(const char *name) {
+    for (int i = 0; i < PATTERN_COUNT; ++i) {
+        if (std::strcmp(patterns[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+static void handoff_pattern(int index) {
+    if (index < 0 || index >= PATTERN_COUNT || index == settings.pattern) {
+        show_status();
+        return;
+    }
+    store_view(settings.pattern);
+    load_view(index);
+    settings.pattern = index;
+    return_pattern = -1;
+    show_status();
+    save_settings(settings);
+}
+
 static void open_pattern_list() {
+    flight_dir = 0;
     selecting = true;
     reset_confirm = false;
     preview = settings.pattern;
@@ -1815,10 +1893,17 @@ static void poll_encoder(uint32_t now) {
         }
         return;
     }
+    if (flight_dir != 0 && (on_solar() || on_galaxy())) {
+        return;
+    }
     if (on_solar()) {
         int steps = consume_nav(detents);
         if (steps != 0) {
+            bool tour = solar_touring();
             solar_turn(steps);
+            if (tour) {
+                show_status();
+            }
         }
         return;
     }
@@ -1855,6 +1940,81 @@ static void poll_encoder(uint32_t now) {
         shift_v = SHIFT_CAP;
     } else if (shift_v < -SHIFT_CAP) {
         shift_v = -SHIFT_CAP;
+    }
+}
+
+static float flight_ease(float t) {
+    return t * t * (3.0f - 2.0f * t);
+}
+
+static void blend_channel(uint8_t &pixel, int sample, float alpha) {
+    int value = (int)(pixel * (1.0f - alpha) + sample * alpha + 0.5f);
+    if (value < 0) {
+        value = 0;
+    } else if (value > 255) {
+        value = 255;
+    }
+    pixel = (uint8_t)value;
+}
+
+// One pullback. Ease 0 is the orrery filling the panel. Ease 1 is the galaxy, and the system sits on the arm.
+static void paint_cosmos(uint8_t *pixels, uint32_t now_ms) {
+    static uint8_t orrery[PANEL_PIXELS * 3];
+    float tip_x;
+    float tip_y;
+    galaxy_arm_tip(tip_x, tip_y);
+    float ease = flight_ease(flight);
+    float scale = expf(logf(CLOSE_SCALE) * (1.0f - ease));
+    float aim_x = PANEL_CX + (tip_x - PANEL_CX) * ease;
+    float aim_y = PANEL_CY + (tip_y - PANEL_CY) * ease;
+    float orrery_scale = scale / CLOSE_SCALE;
+    if (orrery_scale < 0.001f) {
+        orrery_scale = 0.001f;
+    }
+    float cover = 1.0f;
+    if (ease > 0.90f) {
+        cover = (1.0f - ease) / 0.10f;
+    }
+    solar_paint_wide(orrery, now_ms);
+    galaxy_paint_at(pixels, now_ms, scale, tip_x, tip_y, aim_x, aim_y);
+    if (cover <= 0.0f) {
+        return;
+    }
+    float window = 46.0f * orrery_scale;
+    float inv_orr = 1.0f / orrery_scale;
+    for (int y = 0; y < PANEL_HEIGHT; ++y) {
+        for (int x = 0; x < PANEL_WIDTH; ++x) {
+            float dx = (x + 0.5f) - aim_x;
+            float dy = (y + 0.5f) - aim_y;
+            float dist = sqrtf(dx * dx + dy * dy);
+            float edge = (window - dist) / 1.25f;
+            if (edge < 0.0f) {
+                edge = 0.0f;
+            } else if (edge > 1.0f) {
+                edge = 1.0f;
+            }
+            float alpha = edge * cover;
+            if (alpha <= 0.0f) {
+                continue;
+            }
+            float ox = PANEL_CX + dx * inv_orr;
+            float oy = PANEL_CY + dy * inv_orr;
+            int ix = (int)floorf(ox - 0.5f);
+            int iy = (int)floorf(oy - 0.5f);
+            int blue = 0;
+            int green = 0;
+            int red = 0;
+            if (ix >= 0 && iy >= 0 && ix < PANEL_WIDTH && iy < PANEL_HEIGHT) {
+                uint8_t *src = orrery + (iy * PANEL_WIDTH + ix) * 3;
+                blue = src[0];
+                green = src[1];
+                red = src[2];
+            }
+            uint8_t *dst = pixels + (y * PANEL_WIDTH + x) * 3;
+            blend_channel(dst[0], blue, alpha);
+            blend_channel(dst[1], green, alpha);
+            blend_channel(dst[2], red, alpha);
+        }
     }
 }
 
@@ -1939,7 +2099,31 @@ int main() {
         anim_frac -= draw_dt;
         anim_ms += (uint32_t)draw_dt;
 
-        patterns[settings.pattern].draw(frame, anim_ms, draw_dt);
+        if (flight_dir != 0) {
+            float span = (float)draw_dt / (float)FLIGHT_MS;
+            flight += (float)flight_dir * span;
+            if (flight > 1.0f) {
+                flight = 1.0f;
+            } else if (flight < 0.0f) {
+                flight = 0.0f;
+            }
+            if ((flight_dir > 0 && flight >= 1.0f) || (flight_dir < 0 && flight <= 0.0f)) {
+                int dir = flight_dir;
+                flight_dir = 0;
+                if (dir > 0 && !on_galaxy()) {
+                    handoff_pattern(find_pattern("galaxy"));
+                } else if (dir < 0 && !on_solar()) {
+                    handoff_pattern(find_pattern("solar"));
+                }
+            }
+        }
+        if (flight_dir != 0) {
+            solar_step(draw_dt);
+            galaxy_step(draw_dt);
+            paint_cosmos(frame, anim_ms);
+        } else {
+            patterns[settings.pattern].draw(frame, anim_ms, draw_dt);
+        }
         rotate_view(frame);
         translate_view(frame);
         if (!on_settings()) {

@@ -4,7 +4,8 @@
 #include <cstdint>
 
 // Every pattern paints the same frame. One pixel is three bytes, blue, then green, then red.
-// main.cpp calls start when the pattern is entered, then draw about every 40 ms.
+// main.cpp calls start when the pattern is entered from the list or on boot, then draw about every 40 ms.
+// The orange flight between solar and galaxy changes the pattern without calling start, so both pictures keep going.
 //
 // constexpr is a constant fixed when the program is compiled.
 // uint8_t is one byte. uint8_t *frame is the address of the first byte of the picture.
@@ -181,11 +182,19 @@ void reef_start();
 void reef_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 
 void solar_start();
+void solar_ensure();
+void solar_step(int dt_ms);
+void solar_paint_wide(uint8_t *frame, uint32_t anim_ms);
 void solar_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 void solar_turn(int steps);
-void solar_red_tap();
-void solar_red_hold();
-void solar_red_release();
+void solar_show_orrery();
+bool solar_orrery_ready();
+bool solar_touring();
+void solar_tour_toggle();
+void solar_tour_stop();
+void solar_spin_tap();
+void solar_spin_hold();
+void solar_spin_release();
 
 void campfire_start();
 void campfire_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
@@ -219,6 +228,10 @@ void fireworks_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 void fireworks_launch(bool large);
 
 void galaxy_start();
+void galaxy_ensure();
+void galaxy_step(int dt_ms);
+void galaxy_arm_tip(float &x, float &y);
+void galaxy_paint_at(uint8_t *frame, uint32_t anim_ms, float scale, float tip_x, float tip_y, float aim_x, float aim_y);
 void galaxy_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 void galaxy_spin(int steps);
 

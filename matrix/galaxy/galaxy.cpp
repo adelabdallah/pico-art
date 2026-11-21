@@ -1,8 +1,10 @@
 // A tilted spiral galaxy turning in a dark field, warm at the core and blue along two arms.
 // The layout and the motion follow Spiral Galaxy at
 // https://www.ascii-magic.com/ascii/spiral-galaxy
+// The solar system sits on the outer tip of one arm and turns with the disk.
 // The encoder speeds the disk. The background stars keep their own pace.
 // Tipping the panel tilts the disk. Flat and face up keeps the resting oval, and a steeper tip draws it thinner.
+// Orange flies in from that tip to the orrery.
 
 #include "pattern.hpp"
 #include "noise.hpp"
@@ -17,11 +19,15 @@ constexpr float RATE_FLOOR = 0.25f;
 constexpr float RATE_CAP = 8.0f;
 constexpr float CX = (PANEL_WIDTH - 1) * 0.5f;
 constexpr float CY = (PANEL_HEIGHT - 1) * 0.5f;
+// Outer point of one arm. The bright crest is where the angle matches the log spiral.
+constexpr float HOME_RAD = 26.0f;
+constexpr float ARM_K = 0.36f;
 
 static float spin_rate = 1.0f;
 static float spin_angle = 0.0f;
 static float tilt_angle = 0.32f;
 static float tilt_squash = 0.55f;
+static bool ready = false;
 static int star_x[80];
 static int star_y[80];
 static float star_phase[80];
@@ -43,13 +49,7 @@ static void put(uint8_t *frame, int x, int y, int red, int green, int blue) {
     write_bgr(frame + (y * PANEL_WIDTH + x) * 3, red, green, blue);
 }
 
-}  // namespace
-
-void galaxy_start() {
-    spin_rate = 1.0f;
-    spin_angle = 0.0f;
-    tilt_angle = 0.32f;
-    tilt_squash = 0.55f;
+static void build_field() {
     rng_state = 17;
     for (int i = 0; i < 80; ++i) {
         star_x[i] = (int)(rnd() * PANEL_WIDTH);
@@ -60,23 +60,101 @@ void galaxy_start() {
     for (int i = 0; i < 100; ++i) {
         float rad = 3.0f + rnd() * 26.0f;
         disk_rad[i] = rad;
-        disk_arm[i] = (rnd() < 0.5f ? 0.0f : 3.14159265f) + logf(rad) / 0.36f + (rnd() - 0.5f) * 0.7f;
+        disk_arm[i] = (rnd() < 0.5f ? 0.0f : 3.14159265f) + logf(rad) / ARM_K + (rnd() - 0.5f) * 0.7f;
         disk_phase[i] = rnd() * TAU;
     }
 }
 
-void galaxy_spin(int steps) {
-    spin_rate += (float)steps * 0.25f;
-    if (spin_rate < RATE_FLOOR) {
-        spin_rate = RATE_FLOOR;
+static void shade(float px, float py, int &red, int &green, int &blue) {
+    float tilt_c = cosf(tilt_angle);
+    float tilt_s = sinf(tilt_angle);
+    float spin_c = cosf(-spin_angle);
+    float spin_s = sinf(-spin_angle);
+    float dx = px - CX;
+    float dy = py - CY;
+    float u = dx * tilt_c + dy * tilt_s;
+    float w = (-dx * tilt_s + dy * tilt_c) / tilt_squash;
+    float rad = sqrtf(u * u + w * w) + 0.001f;
+    float gu = u * spin_c - w * spin_s;
+    float gw = u * spin_s + w * spin_c;
+    float theta = atan2f(gw, gu);
+    float arm_phase = 2.0f * (theta - logf(rad) / ARM_K);
+    float arm = powf(0.5f + 0.5f * cosf(arm_phase), 2.2f);
+    float lane = powf(0.5f + 0.5f * cosf(arm_phase + 0.9f), 6.0f);
+    float clump = field_fbm(gu * 0.22f + 40.0f, gw * 0.22f, 2, 5);
+    float bulge = expf(-rad / 5.0f) * 1.45f;
+    float disk = expf(-rad / 16.0f) * (0.2f + 1.3f * arm * (0.45f + clump)) * (1.0f - 0.5f * lane * clampf(rad / 8.0f, 0.0f, 1.0f));
+    float intensity = clampf(bulge + disk, 0.0f, 1.0f);
+    if (intensity < 0.08f) {
+        float haze = field_fbm((px - 0.5f) * 0.06f, (py - 0.5f) * 0.08f, 2, 2);
+        int level = (int)(clampf(haze * 0.7f, 0.0f, 1.0f) * 28);
+        red = level / 2;
+        green = level / 2 + 4;
+        blue = 12 + level;
+        return;
     }
-    if (spin_rate > RATE_CAP) {
-        spin_rate = RATE_CAP;
+    float warm = clampf(bulge / (bulge + disk + 0.001f) * 1.4f - 0.15f, 0.0f, 1.0f);
+    if (warm > 0.5f) {
+        red = (int)(50 + intensity * 205);
+        green = (int)(30 + intensity * 180);
+        blue = (int)(16 + intensity * 120);
+    } else if (arm > 0.6f && clump > 0.62f && rad > 8.0f) {
+        red = (int)(140 + (clump - 0.62f) * 300);
+        green = (int)(40 + (clump - 0.62f) * 120);
+        blue = (int)(90 + (clump - 0.62f) * 160);
+    } else {
+        red = (int)(12 + intensity * 120 + warm * 80);
+        green = (int)(24 + intensity * 140);
+        blue = (int)(50 + intensity * 190);
     }
 }
 
-void galaxy_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
-    float seconds = anim_ms * 0.001f;
+static void home_screen(float &sx, float &sy) {
+    float theta = logf(HOME_RAD) / ARM_K;
+    float gu = cosf(theta) * HOME_RAD;
+    float gw = sinf(theta) * HOME_RAD;
+    float u = gu * cosf(spin_angle) - gw * sinf(spin_angle);
+    float w = gu * sinf(spin_angle) + gw * cosf(spin_angle);
+    float flat = w * tilt_squash;
+    float tilt_c = cosf(tilt_angle);
+    float tilt_s = sinf(tilt_angle);
+    sx = CX + u * tilt_c - flat * tilt_s;
+    sy = CY + u * tilt_s + flat * tilt_c;
+}
+
+static void draw_system(uint8_t *frame, float aim_x, float aim_y) {
+    int cx = (int)floorf(aim_x);
+    int cy = (int)floorf(aim_y);
+    put(frame, cx, cy, 255, 228, 140);
+    put(frame, cx + 1, cy, 255, 186, 80);
+    put(frame, cx, cy - 1, 255, 244, 210);
+    put(frame, cx - 1, cy + 1, 80, 150, 255);
+}
+
+}  // namespace
+
+void galaxy_start() {
+    spin_rate = 1.0f;
+    spin_angle = 0.0f;
+    tilt_angle = 0.32f;
+    tilt_squash = 0.55f;
+    build_field();
+    ready = true;
+}
+
+void galaxy_ensure() {
+    if (!ready) {
+        galaxy_start();
+    }
+}
+
+void galaxy_arm_tip(float &x, float &y) {
+    galaxy_ensure();
+    home_screen(x, y);
+}
+
+void galaxy_step(int dt_ms) {
+    galaxy_ensure();
     spin_angle += BASE_SPIN * spin_rate * (float)dt_ms * 0.001f;
     spin_angle = fmodf(spin_angle, TAU);
     if (spin_angle < 0.0f) {
@@ -114,75 +192,77 @@ void galaxy_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     if (tilt_squash < 0.06f) {
         tilt_squash = 0.06f;
     }
-    float tilt_c = cosf(tilt_angle);
-    float tilt_s = sinf(tilt_angle);
-    float spin_c = cosf(-spin_angle);
-    float spin_s = sinf(-spin_angle);
+}
+
+void galaxy_spin(int steps) {
+    galaxy_ensure();
+    spin_rate += (float)steps * 0.25f;
+    if (spin_rate < RATE_FLOOR) {
+        spin_rate = RATE_FLOOR;
+    }
+    if (spin_rate > RATE_CAP) {
+        spin_rate = RATE_CAP;
+    }
+}
+
+void galaxy_paint_at(uint8_t *frame, uint32_t anim_ms, float scale, float tip_x, float tip_y, float aim_x, float aim_y) {
+    galaxy_ensure();
+    float seconds = anim_ms * 0.001f;
+    if (scale < 0.001f) {
+        scale = 0.001f;
+    }
+    float inv = 1.0f / scale;
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
         for (int x = 0; x < PANEL_WIDTH; ++x) {
-            float dx = (float)x + 0.5f - CX;
-            float dy = (float)y + 0.5f - CY;
-            float u = dx * tilt_c + dy * tilt_s;
-            float w = (-dx * tilt_s + dy * tilt_c) / tilt_squash;
-            float rad = sqrtf(u * u + w * w) + 0.001f;
-            float gu = u * spin_c - w * spin_s;
-            float gw = u * spin_s + w * spin_c;
-            float theta = atan2f(gw, gu);
-            float arm_phase = 2.0f * (theta - logf(rad) / 0.36f);
-            float arm = powf(0.5f + 0.5f * cosf(arm_phase), 2.2f);
-            float lane = powf(0.5f + 0.5f * cosf(arm_phase + 0.9f), 6.0f);
-            float clump = field_fbm(gu * 0.22f + 40.0f, gw * 0.22f, 2, 5);
-            float bulge = expf(-rad / 5.0f) * 1.45f;
-            float disk = expf(-rad / 16.0f) * (0.2f + 1.3f * arm * (0.45f + clump)) * (1.0f - 0.5f * lane * clampf(rad / 8.0f, 0.0f, 1.0f));
-            float intensity = clampf(bulge + disk, 0.0f, 1.0f);
+            float px = tip_x + ((x + 0.5f) - aim_x) * inv;
+            float py = tip_y + ((y + 0.5f) - aim_y) * inv;
             int red;
             int green;
             int blue;
-            if (intensity < 0.08f) {
-                float haze = field_fbm(x * 0.06f, y * 0.08f, 2, 2);
-                int level = (int)(clampf(haze * 0.7f, 0.0f, 1.0f) * 28);
-                red = level / 2;
-                green = level / 2 + 4;
-                blue = 12 + level;
-            } else {
-                float warm = clampf(bulge / (bulge + disk + 0.001f) * 1.4f - 0.15f, 0.0f, 1.0f);
-                if (warm > 0.5f) {
-                    red = (int)(50 + intensity * 205);
-                    green = (int)(30 + intensity * 180);
-                    blue = (int)(16 + intensity * 120);
-                } else if (arm > 0.6f && clump > 0.62f && rad > 8.0f) {
-                    red = (int)(140 + (clump - 0.62f) * 300);
-                    green = (int)(40 + (clump - 0.62f) * 120);
-                    blue = (int)(90 + (clump - 0.62f) * 160);
-                } else {
-                    red = (int)(12 + intensity * 120 + warm * 80);
-                    green = (int)(24 + intensity * 140);
-                    blue = (int)(50 + intensity * 190);
-                }
-            }
+            shade(px, py, red, green, blue);
             put(frame, x, y, red, green, blue);
         }
     }
     for (int i = 0; i < 80; ++i) {
-        uint8_t *pixel = frame + (star_y[i] * PANEL_WIDTH + star_x[i]) * 3;
+        float sx = aim_x + ((star_x[i] + 0.5f) - tip_x) * scale;
+        float sy = aim_y + ((star_y[i] + 0.5f) - tip_y) * scale;
+        int ix = (int)floorf(sx);
+        int iy = (int)floorf(sy);
+        if (ix < 0 || iy < 0 || ix >= PANEL_WIDTH || iy >= PANEL_HEIGHT) {
+            continue;
+        }
+        uint8_t *pixel = frame + (iy * PANEL_WIDTH + ix) * 3;
         if (pixel[2] > 40) {
             continue;
         }
         float twinkle = 0.5f + 0.5f * sinf(seconds * (1.0f + star_bright[i] * 2.0f) + star_phase[i]);
         if (twinkle > 0.35f) {
             int level = star_bright[i] > 0.75f ? 240 : 170;
-            put(frame, star_x[i], star_y[i], level, level, 255);
+            put(frame, ix, iy, level, level, 255);
         }
     }
+    float tilt_c = cosf(tilt_angle);
+    float tilt_s = sinf(tilt_angle);
     for (int i = 0; i < 100; ++i) {
         float angle = disk_arm[i] + spin_angle;
         float u = cosf(angle) * disk_rad[i];
         float w = sinf(angle) * disk_rad[i];
         float flat = w * tilt_squash;
-        int x = (int)(CX + u * tilt_c - flat * tilt_s + 0.5f);
-        int y = (int)(CY + u * tilt_s + flat * tilt_c + 0.5f);
+        float base_x = CX + u * tilt_c - flat * tilt_s;
+        float base_y = CY + u * tilt_s + flat * tilt_c;
+        float sx = aim_x + (base_x - tip_x) * scale;
+        float sy = aim_y + (base_y - tip_y) * scale;
         if (sinf(seconds * 2.0f + disk_phase[i]) > -0.2f) {
-            put(frame, x, y, 230, 236, 255);
+            put(frame, (int)(sx + 0.5f), (int)(sy + 0.5f), 230, 236, 255);
         }
     }
+    draw_system(frame, aim_x, aim_y);
+}
+
+void galaxy_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
+    galaxy_step(dt_ms);
+    float tip_x;
+    float tip_y;
+    galaxy_arm_tip(tip_x, tip_y);
+    galaxy_paint_at(frame, anim_ms, 1.0f, tip_x, tip_y, tip_x, tip_y);
 }

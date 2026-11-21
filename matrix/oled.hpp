@@ -28,7 +28,8 @@ struct OledScene {
 // number is the pattern's place, starting at 1 for plasma, drawn on the right. Zero and below draw no number.
 // flash blanks that name on a steady beat.
 // oled_hold_title keeps the next name lit for one beat, even in the middle of a blank.
-void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count, bool flash, const OledScene &scene, int number);
+// play draws a right-pointing triangle in the bottom right of the blue band. It bobs.
+void oled_show_pattern(const char *title, uint32_t now_ms, const float *bands, int band_count, bool flash, const OledScene &scene, int number, bool play);
 // Liquid keeps the name in yellow. Blue shows whether the mic is on, then an equalizer.
 void oled_show_liquid(const char *title, const char *listen, const float *bands, int band_count, uint32_t now_ms, bool flash, int number);
 // Yellow band is the setting name and a small icon. Blue band is a bar and the value.
