@@ -733,7 +733,39 @@ struct PlacedLine {
     Stamp stamp;
     float left;
     float top;
+    float scale;
 };
+
+// The sway used below. The fit leaves the whole word on the panel at the widest swing.
+constexpr float BOOT_SWAY = 0.09f;
+
+static float boot_fit(int full_w, int full_h) {
+    float extent = (float)full_w * cosf(BOOT_SWAY) + (float)full_h * sinf(BOOT_SWAY);
+    float limit = (float)PANEL_WIDTH - 2.0f;
+    if (extent <= limit) {
+        return 1.0f;
+    }
+    return limit / extent;
+}
+
+static bool boot_ink(const Stamp &stamp, float sx, float sy, float scale, int &index) {
+    if (scale >= 0.999f) {
+        return stamp_ink(stamp, (int)floorf(sx), (int)floorf(sy), index);
+    }
+    float half = 0.49f / scale;
+    int x0 = (int)floorf(sx - half);
+    int x1 = (int)floorf(sx + half);
+    int y0 = (int)floorf(sy - half);
+    int y1 = (int)floorf(sy + half);
+    for (int iy = y0; iy <= y1; ++iy) {
+        for (int ix = x0; ix <= x1; ++ix) {
+            if (stamp_ink(stamp, ix, iy, index)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 // One full turn of the liquid hue about every 0.7 seconds.
 static void hue_rgb(float turns, float sat, float value, int &red, int &green, int &blue) {
@@ -793,30 +825,32 @@ static void paint_boot(uint8_t *frame, bool over_stars) {
     const BootPhrase &phrase = PHRASES[phrase_index];
     PlacedLine lines[2];
     lines[0].stamp = make_stamp(phrase.upper, phrase.upper_sx, phrase.upper_sy, phrase.upper_gap);
+    lines[0].scale = boot_fit(lines[0].stamp.width, lines[0].stamp.height);
     int line_count = 1;
     if (phrase.lower != nullptr) {
         lines[1].stamp = make_stamp(phrase.lower, phrase.lower_sx, phrase.lower_sy, phrase.lower_gap);
+        lines[1].scale = boot_fit(lines[1].stamp.width, lines[1].stamp.height);
         line_count = 2;
     }
     // A few degrees, so the glass stays on the panel while it sways.
     float sec = elapsed * 0.001f;
-    float ang = sinf(sec * 1.7f) * 0.09f;
+    float ang = sinf(sec * 1.7f) * BOOT_SWAY;
     float bob = sinf(sec * 2.2f) * 1.3f;
     float fill = span_u(0, BOOT_FILL_MS);
     float cosine = cosf(ang);
     float sine = sinf(ang);
     float cy = 31.5f + bob;
     constexpr float LINE_GAP = 4.0f;
-    float block_h = (float)lines[0].stamp.height;
+    float block_h = (float)lines[0].stamp.height * lines[0].scale;
     if (line_count == 2) {
-        block_h += LINE_GAP + (float)lines[1].stamp.height;
+        block_h += LINE_GAP + (float)lines[1].stamp.height * lines[1].scale;
     }
     float block_top = cy - block_h * 0.5f;
-    lines[0].left = 31.5f - lines[0].stamp.width * 0.5f;
+    lines[0].left = 31.5f - lines[0].stamp.width * lines[0].scale * 0.5f;
     lines[0].top = block_top;
     if (line_count == 2) {
-        lines[1].left = 31.5f - lines[1].stamp.width * 0.5f;
-        lines[1].top = block_top + (float)lines[0].stamp.height + LINE_GAP;
+        lines[1].left = 31.5f - lines[1].stamp.width * lines[1].scale * 0.5f;
+        lines[1].top = block_top + (float)lines[0].stamp.height * lines[0].scale + LINE_GAP;
     }
     float turns = sec / 0.7f;
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
@@ -831,15 +865,18 @@ static void paint_boot(uint8_t *frame, bool over_stars) {
             for (int line = 0; line < line_count; ++line) {
                 float wx = px - lines[line].left;
                 float wy = py - lines[line].top;
-                float width = (float)lines[line].stamp.width;
-                float height = (float)lines[line].stamp.height;
+                float scale = lines[line].scale;
+                float width = (float)lines[line].stamp.width * scale;
+                float height = (float)lines[line].stamp.height * scale;
                 if (wx < -1.0f || wy < -1.0f || wx > width + 1.0f || wy > height + 1.0f) {
                     continue;
                 }
-                int ix = (int)floorf(wx);
-                int iy = (int)floorf(wy);
+                float sx = wx / scale;
+                float sy = wy / scale;
+                int ix = (int)floorf(sx);
+                int iy = (int)floorf(sy);
                 int index = 0;
-                if (stamp_ink(lines[line].stamp, ix, iy, index)) {
+                if (boot_ink(lines[line].stamp, sx, sy, scale, index)) {
                     float slosh = sinf(px * 0.35f - sec * 3.2f) * 1.6f * (1.0f - fill);
                     float surf = block_top + (1.0f - fill) * block_h + slosh;
                     int red = 0;
