@@ -237,3 +237,12 @@ void galaxy_spin(int steps);
 
 void settings_start();
 void settings_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+
+// Boot intro. Red calls intro_skip. The saved pattern fades in while intro_fading is true.
+void intro_start();
+void intro_advance(int dt_ms);
+void intro_paint(uint8_t *frame);
+void intro_skip();
+bool intro_active();
+bool intro_fading();
+float intro_gain();

@@ -1,6 +1,6 @@
 # Pico art piece
 
-Two programs live here. `matrix/` is the wall piece, C++ on a Pico 2W driving a 64 by 64 panel and the switchboard. `main.py` is the handheld Unicorn program. `bringup_unicorn_ups.py` is a one-shot check of that pack and the battery monitor. The rest of this file is the original Unicorn plan.
+Two programs live here. `matrix/` is the xyloscope, the wall piece, C++ on a Pico 2W driving a 64 by 64 panel and the switchboard. `main.py` is the handheld Unicorn program. `bringup_unicorn_ups.py` is a one-shot check of that pack and the battery monitor. The rest of this file is the original Unicorn plan.
 
 A handheld light that pours its pixels along gravity, reshapes that pattern from the four buttons, reacts to a tap, shows a coarse equalizer, and speaks in tones and grains. It can hold the last few seconds of that sound as a loop. The computer is a Raspberry Pi Pico 2W. Everything else hangs off the two header rows.
 

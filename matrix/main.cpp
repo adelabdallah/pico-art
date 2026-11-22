@@ -1,4 +1,8 @@
-// Firmware for a Waveshare P2.5 64x64 HUB75 panel on a Pico.
+// Xyloscope firmware for a Waveshare P2.5 64x64 HUB75 panel on a Pico.
+//
+// On boot the panel plays an intro. A glass BOOT fills, a starfield speeds up and zooms into the centre,
+// then XYLO and SCOPE land. Red skips the intro and the saved pattern appears at once.
+// The OLED reads XYLOSCOPE until the intro ends.
 //
 // Each pattern lives in its own directory and paints the same framebuffer.
 // The first encoder click waits. When the wait ends, the current name flashes and the pattern list scrolls.
@@ -660,6 +664,17 @@ static void format_timer(char *dst, int size, int minutes) {
 }
 
 static void present_oled(uint32_t now) {
+    if (intro_active()) {
+        char title[16];
+        format_title(title, (int)sizeof title, "xyloscope");
+        OledScene scene;
+        scene.lines = 0;
+        scene.circles = 0;
+        scene.turn = 0.0f;
+        scene.slide = 0.0f;
+        oled_show_pattern(title, now, nullptr, 0, false, scene, -1, false);
+        return;
+    }
     bool browsing = selecting && (select_moved || !on_settings());
     if (on_settings() && !browsing) {
         char value[8];
@@ -2031,6 +2046,28 @@ static void core1_entry() {
     }
 }
 
+// Red skips the intro. Other presses are tracked so they do not act when the picture appears.
+static void hold_intro(uint32_t now) {
+    note_activity(now);
+    for (int i = 0; i < BUTTON_COUNT; ++i) {
+        PanelButton &button = buttons[i];
+        bool down = gpio_get(button.gpio) == 0;
+        bool pressed = down && !button.down;
+        button.down = down;
+        if (pressed) {
+            button.pressed_at = now;
+        }
+        if (pressed && button.role == ButtonRole::Pause) {
+            intro_skip();
+        }
+    }
+    click_down = gpio_get(PIN_ENC_CLICK) == 0;
+    click_wait = false;
+    (void)take_detents();
+    enc_rest = 0;
+    nav_rest = 0;
+}
+
 int main() {
     // 266 MHz matches the Waveshare HUB75 example. The panel timing is built for that clock.
     set_sys_clock_khz(266000, true);
@@ -2054,6 +2091,7 @@ int main() {
     oled_set_contrast(settings.oled_bright);
 
     patterns[settings.pattern].start();
+    intro_start();
     printf("patterns: plasma, warp, feedback, metaballs, reaction, life, flow field, voronoi cells, loop, liquid, pipes, reef, solar, campfire, skyline, lighthouse, ferris wheel, aurora, fireworks, galaxy, settings\n");
     show_status();
 
@@ -2071,64 +2109,85 @@ int main() {
         }
 
         uint32_t now = to_ms_since_boot(started);
-        advance_hue(now, dt);
-
-        for (int i = 0; i < BUTTON_COUNT; ++i) {
-            poll_button(buttons[i], now);
+        bool playing = intro_active();
+        if (playing) {
+            hold_intro(now);
         }
-        poll_encoder(now);
-
-        update_motion(now);
-        if (on_campfire()) {
-            view_angle = 0.0f;
-            view_target = 0.0f;
-            view_spinning = false;
-        }
-        update_turn(dt);
-        update_shift(dt);
-        update_mirror_motion(dt);
-        float rate = motion * play_speed;
-        if (burst != BurstPhase::Idle) {
-            rate = 1.0f;
-        }
-        anim_frac += dt * rate;
-        int draw_dt = (int)anim_frac;
-        if (draw_dt < 0) {
-            draw_dt = 0;
-        }
-        anim_frac -= draw_dt;
-        anim_ms += (uint32_t)draw_dt;
-
-        if (flight_dir != 0) {
-            float span = (float)draw_dt / (float)FLIGHT_MS;
-            flight += (float)flight_dir * span;
-            if (flight > 1.0f) {
-                flight = 1.0f;
-            } else if (flight < 0.0f) {
-                flight = 0.0f;
+        if (!intro_active()) {
+            advance_hue(now, dt);
+            for (int i = 0; i < BUTTON_COUNT; ++i) {
+                poll_button(buttons[i], now);
             }
-            if ((flight_dir > 0 && flight >= 1.0f) || (flight_dir < 0 && flight <= 0.0f)) {
-                int dir = flight_dir;
-                flight_dir = 0;
-                if (dir > 0 && !on_galaxy()) {
-                    handoff_pattern(find_pattern("galaxy"));
-                } else if (dir < 0 && !on_solar()) {
-                    handoff_pattern(find_pattern("solar"));
+            poll_encoder(now);
+        }
+
+        // The intro owns the panel until it finishes or red skips it.
+        bool curtain = intro_active() && !intro_fading();
+        if (!curtain) {
+            update_motion(now);
+            if (on_campfire()) {
+                view_angle = 0.0f;
+                view_target = 0.0f;
+                view_spinning = false;
+            }
+            update_turn(dt);
+            update_shift(dt);
+            update_mirror_motion(dt);
+            float rate = motion * play_speed;
+            if (burst != BurstPhase::Idle) {
+                rate = 1.0f;
+            }
+            anim_frac += dt * rate;
+            int draw_dt = (int)anim_frac;
+            if (draw_dt < 0) {
+                draw_dt = 0;
+            }
+            anim_frac -= draw_dt;
+            anim_ms += (uint32_t)draw_dt;
+
+            if (flight_dir != 0) {
+                float span = (float)draw_dt / (float)FLIGHT_MS;
+                flight += (float)flight_dir * span;
+                if (flight > 1.0f) {
+                    flight = 1.0f;
+                } else if (flight < 0.0f) {
+                    flight = 0.0f;
+                }
+                if ((flight_dir > 0 && flight >= 1.0f) || (flight_dir < 0 && flight <= 0.0f)) {
+                    int dir = flight_dir;
+                    flight_dir = 0;
+                    if (dir > 0 && !on_galaxy()) {
+                        handoff_pattern(find_pattern("galaxy"));
+                    } else if (dir < 0 && !on_solar()) {
+                        handoff_pattern(find_pattern("solar"));
+                    }
                 }
             }
+            if (flight_dir != 0) {
+                solar_step(draw_dt);
+                galaxy_step(draw_dt);
+                paint_cosmos(frame, anim_ms);
+            } else {
+                patterns[settings.pattern].draw(frame, anim_ms, draw_dt);
+            }
+            rotate_view(frame);
+            translate_view(frame);
+            if (!on_settings()) {
+                apply_mirrors(frame);
+                apply_hue(frame, settings.hue);
+            }
+            if (intro_fading()) {
+                apply_gain(frame, intro_gain());
+            }
         }
-        if (flight_dir != 0) {
-            solar_step(draw_dt);
-            galaxy_step(draw_dt);
-            paint_cosmos(frame, anim_ms);
-        } else {
-            patterns[settings.pattern].draw(frame, anim_ms, draw_dt);
+        if (curtain) {
+            intro_paint(frame);
         }
-        rotate_view(frame);
-        translate_view(frame);
-        if (!on_settings()) {
-            apply_mirrors(frame);
-            apply_hue(frame, settings.hue);
+        if (intro_active()) {
+            intro_advance(dt);
+        }
+        if (playing && !intro_active()) {
+            oled_now = true;
         }
         present_frame(frame, now);
         update_bgr(frame);

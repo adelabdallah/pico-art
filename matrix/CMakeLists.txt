@@ -31,6 +31,7 @@ set(HUB75_DIR ${CMAKE_CURRENT_LIST_DIR}/third_party/waveshare/src)
 add_executable(matrix
     main.cpp
     oled.cpp
+    intro/intro.cpp
     plasma/plasma.cpp
     warp/warp.cpp
     feedback/feedback.cpp
