@@ -22,7 +22,7 @@ constexpr int CHASE_MS = 2000;
 constexpr int POP_MS = 280;
 constexpr int SHINE_MS = 420;
 constexpr int HOLD_MS = 500;
-constexpr int FLY_MS = 700;
+constexpr int FLY_MS = 320;
 constexpr int FADE_MS = 2000;
 
 constexpr int WARP_AT = BOOT_MS;
@@ -1279,7 +1279,7 @@ static void paint_splash(uint8_t *frame) {
         scope_at.scale = bump;
     }
     if (elapsed >= (uint32_t)FLY_AT) {
-        float zoom = 1.0f + fly * fly * 4.4f;
+        float zoom = 1.0f + fly * fly * 10.0f;
         xylo_at.scale = zoom;
         scope_at.scale = zoom;
         xylo_at.ox = 31.5f;

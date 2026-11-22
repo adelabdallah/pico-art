@@ -10,6 +10,7 @@
 // A second click during the wait jumps to settings. Another double click returns to the pattern that was showing.
 // That return lasts until power-off. A turn during the wait opens the list and takes the turn.
 // A step shows the next name at once, even in the middle of that flash.
+// INTRO sits between settings and RESET?. A click there plays the intro, then the pattern that was showing returns.
 // The list ends on RESET?. A click there asks ARE YOU SURE?. Another click clears every pattern's mirrors, slide, turn, and the hue.
 // Outside that mode, the encoder flings the picture sideways, or edits the open setting.
 // Settings is the last pattern. There, blue picks a value and the encoder raises or lowers it.
@@ -25,7 +26,7 @@
 //
 // GP14 SDA and GP15 SCL drive the 128 by 64 OLED.
 // The yellow band names the pattern, or the setting while settings is open.
-// Each pattern keeps its number on the right of that band. Plasma is 1. Settings and the reset prompts have none.
+// Each pattern keeps its number on the right of that band. Plasma is 1. Settings, INTRO, and the reset prompts have none.
 // The blue band draws slow waves that follow the mirrors, the turn, and a slide.
 // On liquid it shows the mic and an equalizer.
 // The OLED turns off after its timer. The default is 2 minutes. A button turns it back on.
@@ -370,8 +371,9 @@ static bool line_turning = false;
 static bool circle_growing = false;
 static bool reset_confirm = false;
 
-constexpr int RESET_SLOT = PATTERN_COUNT;
-constexpr int LIST_COUNT = PATTERN_COUNT + 1;
+constexpr int INTRO_SLOT = PATTERN_COUNT;
+constexpr int RESET_SLOT = PATTERN_COUNT + 1;
+constexpr int LIST_COUNT = PATTERN_COUNT + 2;
 
 static float wrap_hue(float turns) {
     turns = turns - (float)(int)turns;
@@ -722,6 +724,8 @@ static void present_oled(uint32_t now) {
     int number = -1;
     if (reset_confirm) {
         format_title(title, (int)sizeof title, "ARE YOU SURE?");
+    } else if (browsing && preview == INTRO_SLOT) {
+        format_title(title, (int)sizeof title, "intro");
     } else if (browsing && preview == RESET_SLOT) {
         format_title(title, (int)sizeof title, "RESET?");
     } else {
@@ -1849,6 +1853,11 @@ static void poll_encoder(uint32_t now) {
                 reset_confirm = false;
                 nav_rest = 0;
                 clear_view();
+                show_status();
+            } else if (preview == INTRO_SLOT) {
+                selecting = false;
+                nav_rest = 0;
+                intro_start();
                 show_status();
             } else if (preview == RESET_SLOT) {
                 reset_confirm = true;

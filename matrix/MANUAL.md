@@ -72,7 +72,7 @@ Boot plays an intro, then fades in the saved pattern. With a blank memory that p
 
 A glass phrase fills over 3 seconds and sways a little. The liquid inside shifts through a rainbow, one turn about every 0.7 seconds. Each boot picks one phrase at random: BOOTING, LOADING, PAINTING, NOW IN 3D!, BEEP BOOP, or WOWZA. NOW IN 3D! is two lines, with 3D! larger and underneath. BEEP BOOP is two lines of the same size. A phrase that is wider than the panel runs off the edge. The word then flickers, slowly and then quickly, and fades over 1 second. A starfield shows through that flicker. The stars speed up over 1 second, rush into the centre, and fade to black over 1 second.
 
-XYLO slides in from the left across the top half. SCOPE grows out of the centre and lands on the lower half. Both have landed after about 1.2 seconds. The letters are 28 pixels tall and fill the middle of the panel, one pixel clear of the border. XYLO is blocky, with straight edges. SCOPE has rounded edges. Both words are the same height. XYLO is red, yellow, green, then blue. SCOPE is chrome. A rainbow of seven colours chases the border for 2 seconds. The border is one pixel wide, and both words fill while the rainbow runs. A small pop follows, and a gold shine sweeps the whole panel from the top left to the bottom right. The rainbow border then locks and holds. The letters fly toward the camera, and the saved pattern fades in over 2 seconds.
+XYLO slides in from the left across the top half. SCOPE grows out of the centre and lands on the lower half. Both have landed after about 1.2 seconds. The letters are 28 pixels tall and fill the middle of the panel, one pixel clear of the border. XYLO is blocky, with straight edges. SCOPE has rounded edges. Both words are the same height. XYLO is red, yellow, green, then blue. SCOPE is chrome. A rainbow of seven colours chases the border for 2 seconds. The border is one pixel wide, and both words fill while the rainbow runs. A small pop follows, and a gold shine sweeps the whole panel from the top left to the bottom right. The rainbow border then locks and holds. The letters fly toward the camera in about a third of a second, and the saved pattern fades in over 2 seconds.
 
 Red skips the intro at any moment, including the fade. The saved pattern appears on the next frame, already running. After the intro, red pauses the picture again. The other buttons and the encoder wait until the intro ends. The OLED yellow band reads XYLOSCOPE for the whole intro.
 
@@ -82,7 +82,7 @@ These apply on every pattern except where a later section names a different acti
 
 | Control | Action |
 | --- | --- |
-| Encoder click | Waits for a second click. When the wait ends, the pattern list opens and the OLED flashes the current name. A turn moves through the names, and the next name shows at once. A click while the list is open selects the name under the flash. The list ends on `RESET?`. A click there asks `ARE YOU SURE?`. Another click clears every pattern's mirrors, slide, and turn, and clears the hue. A turn during the wait opens the list and takes the turn. |
+| Encoder click | Waits for a second click. When the wait ends, the pattern list opens and the OLED flashes the current name. A turn moves through the names, and the next name shows at once. A click while the list is open selects the name under the flash. `INTRO` sits between settings and `RESET?`, with no number. A click there plays the intro, then the pattern that was showing returns. The list ends on `RESET?`. A click there asks `ARE YOU SURE?`. Another click clears every pattern's mirrors, slide, and turn, and clears the hue. A turn during the wait opens the list and takes the turn. |
 | Encoder double click | Jumps to settings. Another double click returns to the pattern that was showing. That return lasts until power-off. On settings, with no pattern waiting, the double click stays on settings. |
 | Encoder turn | Flings the picture sideways. The fling coasts and then stops. |
 | Red | Eases the picture to a stop, or back to full speed, over about two seconds. A stopped picture pulses. |
@@ -95,7 +95,7 @@ Mirrors, the turn, and the sideways slide belong to the pattern that was showing
 
 ## Patterns
 
-Plasma is 1. Settings and the reset prompts have no number. The yellow band shows the name, and the pattern number sits on the right of that band. The blue band draws slow waves that follow the mirrors, the turn, and a sideways slide. Liquid replaces those waves with the microphone state and an equalizer.
+Plasma is 1. Settings, INTRO, and the reset prompts have no number. The yellow band shows the name, and the pattern number sits on the right of that band. The blue band draws slow waves that follow the mirrors, the turn, and a sideways slide. Liquid replaces those waves with the microphone state and an equalizer.
 
 | No. | Name | Picture |
 | --- | --- | --- |
