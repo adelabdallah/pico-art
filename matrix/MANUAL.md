@@ -70,9 +70,9 @@ The panel timer choices are 1, 2, 5, 10, 15, 30, and 60 minutes, then a forever 
 
 Boot plays an intro, then fades in the saved pattern. With a blank memory that pattern is plasma.
 
-A glass word, BOOT, fills with cyan over 3 seconds and sways a little. It then flickers, slowly and then quickly, and fades over 1 second. A starfield shows through that flicker. The stars speed up over 3 seconds, rush into the centre, and fade to black over 1 second.
+A glass word, BOOT, fills with cyan over 3 seconds and sways a little. It then flickers, slowly and then quickly, and fades over 1 second. A starfield shows through that flicker. The stars speed up over 1 second, rush into the centre, and fade to black over 1 second.
 
-XYLO slides in from the left across the top half. SCOPE grows out of the centre and lands on the lower half. Both have landed after about 1.2 seconds. XYLO is red, yellow, green, then blue. SCOPE is chrome. A rainbow of seven colours chases the border for 2 seconds. The border is one pixel wide, and both words fill while the rainbow runs. A small pop follows. The rainbow border then locks and holds. The letters fly toward the camera, and the saved pattern fades in over 2 seconds.
+XYLO slides in from the left across the top half. SCOPE grows out of the centre and lands on the lower half. Both have landed after about 1.2 seconds. XYLO is red, yellow, green, then blue. SCOPE is chrome. A rainbow of seven colours chases the border for 2 seconds. The border is one pixel wide, and both words fill while the rainbow runs. A small pop follows, and a gold shine sweeps the whole panel from the top left to the bottom right. The rainbow border then locks and holds. The letters fly toward the camera, and the saved pattern fades in over 2 seconds.
 
 Red skips the intro at any moment, including the fade. The saved pattern appears on the next frame, already running. After the intro, red pauses the picture again. The other buttons and the encoder wait until the intro ends. The OLED yellow band reads XYLOSCOPE for the whole intro.
 

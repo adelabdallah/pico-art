@@ -14,11 +14,12 @@
 constexpr int BOOT_FILL_MS = 3000;
 constexpr int BOOT_FLICKER_MS = 1000;
 constexpr int BOOT_MS = BOOT_FILL_MS + BOOT_FLICKER_MS;
-constexpr int WARP_MS = 3000;
+constexpr int WARP_MS = 1000;
 constexpr int ZOOM_MS = 1000;
 constexpr int ENTER_MS = 1200;
 constexpr int CHASE_MS = 2000;
 constexpr int POP_MS = 280;
+constexpr int SHINE_MS = 420;
 constexpr int HOLD_MS = 500;
 constexpr int FLY_MS = 700;
 constexpr int FADE_MS = 2000;
@@ -898,6 +899,40 @@ static void paint_word(uint8_t *frame, const Place &place, const Stamp &stamp, b
     }
 }
 
+// Wide band, so the sweep still reads while it crosses the panel quickly.
+static void paint_gold_shine(uint8_t *frame) {
+    if (elapsed < (uint32_t)POP_AT || elapsed >= (uint32_t)POP_AT + (uint32_t)SHINE_MS) {
+        return;
+    }
+    float u = span_u(POP_AT, SHINE_MS);
+    float span = (float)(PANEL_WIDTH + PANEL_HEIGHT - 2);
+    float half = 22.0f;
+    float head = -half + u * (span + half * 2.0f);
+    for (int y = 0; y < PANEL_HEIGHT; ++y) {
+        for (int x = 0; x < PANEL_WIDTH; ++x) {
+            float dist = fabsf((float)(x + y) - head);
+            if (dist > half) {
+                continue;
+            }
+            float strength = 1.0f - dist / half;
+            strength = strength * strength;
+            uint8_t *pixel = frame + (y * PANEL_WIDTH + x) * 3;
+            int blue = pixel[0];
+            int green = pixel[1];
+            int red = pixel[2];
+            int gold_r = 255;
+            int gold_g = mix_channel(168, 246, strength);
+            int gold_b = mix_channel(32, 186, strength);
+            float mix = strength * 0.94f;
+            write_bgr(
+                pixel,
+                mix_channel(red, gold_r, mix),
+                mix_channel(green, gold_g, mix),
+                mix_channel(blue, gold_b, mix));
+        }
+    }
+}
+
 static void paint_splash(uint8_t *frame) {
     float fly = span_u(FLY_AT, FLY_MS);
     float field = 1.0f;
@@ -951,6 +986,7 @@ static void paint_splash(uint8_t *frame) {
     }
     paint_word(frame, xylo_at, xylo, false, letter_alpha);
     paint_word(frame, scope_at, scope, true, letter_alpha);
+    paint_gold_shine(frame);
 }
 
 void intro_start() {
