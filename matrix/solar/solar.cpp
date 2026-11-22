@@ -1,9 +1,9 @@
 // An orrery on the wide view, and a close portrait of each world.
 // Each orbit is its own hoop, leaned so the paths cross in front of and behind each other.
-// Tipping the panel looks around that model. Flat, face up, is the resting view.
+// Tipping the panel looks around that model, and around a close-up the same way. The world stays centred. Flat, face up, is the resting view.
 // The encoder walks the stops. Green flings the portrait's spin, or the whole orrery on the wide view.
 // Orange returns to the orrery, and from there the view pulls back into the galaxy.
-// Yellow tours the stops. Each one holds for 5 seconds. The view tumbles slowly and each world stays centred while its surface turns.
+// Yellow tours the stops. Each one holds for 5 seconds. The tour's nod is the large swing, so the poles pass through the disc.
 // Orbit spacing is even so the rings stay apart. Periods follow the real order, with the outer worlds compressed into a few minutes.
 // Coasts, bands, and crater rims fade softly. The gas giants' bands wave and slowly roil. Earth carries the finest surface.
 // The Moon and Charon are large enough to read. They spin and orbit faster while green is held, and while the tour runs.
@@ -663,19 +663,12 @@ static void colour_pluto(float lon, float lat, int &red, int &green, int &blue) 
     mix_ink(red, green, blue, 232, 220, 206, oval_cover(lon, lat, -1.35f, -0.48f, 0.16f, 0.12f) * (1.0f - heart));
 }
 
-static void gyro_aim(float time, float &yaw, float &pitch, float &roll);
-
-static void face_tour(float &nx, float &ny, float &nz) {
-    if (tour_blend <= 0.001f) {
+static void face_view(float &nx, float &ny, float &nz) {
+    float yaw_now = cam_yaw;
+    float pitch_now = cam_pitch - CAM_PITCH;
+    if (fabsf(yaw_now) < 0.001f && fabsf(pitch_now) < 0.001f) {
         return;
     }
-    float yaw;
-    float pitch;
-    float roll;
-    gyro_aim(tour_time, yaw, pitch, roll);
-    float yaw_now = yaw * tour_blend;
-    float pitch_now = (pitch - CAM_PITCH) * tour_blend;
-    (void)roll;
     float cy = cosf(yaw_now);
     float sy = sinf(yaw_now);
     float x1 = nx * cy + nz * sy;
@@ -689,8 +682,25 @@ static void face_tour(float &nx, float &ny, float &nz) {
     nz = z2;
 }
 
+// Maps a point that rides with the world back into the centred portrait. Near side is toward the viewer.
+static void look_around(float &x, float &y, float z, bool &near_side) {
+    float yaw_now = cam_yaw;
+    float pitch_now = cam_pitch - CAM_PITCH;
+    float cy = cosf(yaw_now);
+    float sy = sinf(yaw_now);
+    float cp = cosf(pitch_now);
+    float sp = sinf(pitch_now);
+    float y1 = y * cp + z * sp;
+    float z1 = -y * sp + z * cp;
+    float x2 = x * cy - z1 * sy;
+    float z2 = x * sy + z1 * cy;
+    x = x2;
+    y = y1;
+    near_side = z2 > 0.0f;
+}
+
 static void shade_body(int stop, float nx, float ny, float nz, int &red, int &green, int &blue) {
-    face_tour(nx, ny, nz);
+    face_view(nx, ny, nz);
     float spin = spin_angle[stop];
     float lon = atan2f(nx, nz) + spin;
     float lat = asinf(clampf(-ny, -1.0f, 1.0f));
@@ -1011,10 +1021,10 @@ static void draw_orrery(uint8_t *frame, uint32_t anim_ms, float zoom_now, float 
     paint_marks(frame);
 }
 
-// Three rates that do not share a period, so the tumble keeps changing.
+// Three rates that do not share a period, so the tumble keeps changing. The nod is the large one, so the poles swing through.
 static void gyro_aim(float time, float &yaw, float &pitch, float &roll) {
     yaw = 0.70f * sinf(time * 0.35f);
-    pitch = CAM_PITCH + 0.45f * sinf(time * 0.22f + 1.1f);
+    pitch = CAM_PITCH + 1.05f * sinf(time * 0.22f + 1.1f);
     roll = 0.55f * sinf(time * 0.17f + 0.7f);
 }
 
@@ -1370,20 +1380,34 @@ static void draw_disc(uint8_t *frame, int stop, float body_cx, float body_cy, fl
     }
 }
 
+static void moon_place(int index, float &lx, float &ly, bool &near_side) {
+    float ang = moon_angle[index];
+    lx = cosf(ang) * MOONS[index].orbit;
+    ly = sinf(ang) * MOONS[index].orbit * 0.72f;
+    float depth = sinf(ang) * MOONS[index].orbit * 0.50f;
+    look_around(lx, ly, depth, near_side);
+}
+
 static void draw_portrait_stars(uint8_t *frame, int stop, float body_cx, float body_cy, float roll, float alpha, uint32_t anim_ms) {
     for (int i = 0; i < PORTRAIT_STARS; ++i) {
         uint32_t n = mix((uint32_t)stop * 1000u + (uint32_t)i * 49u);
         float ang = (n % 1000u) / 1000.0f * TWO_PI;
         float reach = PORTRAIT_R + 5.0f + (float)(n % 11u);
+        float lx = cosf(ang) * reach;
+        float ly = sinf(ang) * reach;
+        bool near_side = false;
+        look_around(lx, ly, 0.0f, near_side);
+        (void)near_side;
         float sx;
         float sy;
-        to_screen(cosf(ang) * reach, sinf(ang) * reach, body_cx, body_cy, roll, sx, sy);
+        to_screen(lx, ly, body_cx, body_cy, roll, sx, sy);
         int level = star_level(n, anim_ms);
         paint_f(frame, sx, sy, level, level, level + (int)(n % 3u), alpha);
     }
 }
 
 static void shade_moon(bool luna, float nx, float ny, float nz, float spin, int &red, int &green, int &blue) {
+    face_view(nx, ny, nz);
     float lon = atan2f(nx, nz) + spin;
     float lat = asinf(clampf(-ny, -1.0f, 1.0f));
     constexpr float lx = -0.42f;
@@ -1432,10 +1456,7 @@ static void shade_moon(bool luna, float nx, float ny, float nz, float spin, int 
     blue = clamp_channel((float)blue * light);
 }
 
-static void draw_moon_disc(uint8_t *frame, int index, float body_cx, float body_cy, float roll, float alpha, bool behind) {
-    float ang = moon_angle[index];
-    float lx = cosf(ang) * MOONS[index].orbit;
-    float ly = sinf(ang) * MOONS[index].orbit * 0.72f;
+static void draw_moon_disc(uint8_t *frame, int index, float lx, float ly, float body_cx, float body_cy, float roll, float alpha, bool behind) {
     float radius = MOONS[index].radius;
     float scx;
     float scy;
@@ -1489,20 +1510,20 @@ static void draw_moons(uint8_t *frame, int stop, float body_cx, float body_cy, f
         if (MOONS[i].stop != stop) {
             continue;
         }
-        float ang = moon_angle[i];
+        float lx = 0.0f;
+        float ly = 0.0f;
+        bool near_side = false;
+        moon_place(i, lx, ly, near_side);
         if (MOONS[i].radius > 1.0f) {
-            bool ahead = sinf(ang) > 0.0f;
-            if (ahead != front) {
+            if (near_side != front) {
                 continue;
             }
-            draw_moon_disc(frame, i, body_cx, body_cy, roll, alpha, !front);
+            draw_moon_disc(frame, i, lx, ly, body_cx, body_cy, roll, alpha, !front);
             continue;
         }
         if (front) {
             continue;
         }
-        float lx = cosf(ang) * MOONS[i].orbit;
-        float ly = sinf(ang) * MOONS[i].orbit * 0.72f;
         if (lx * lx + ly * ly < (PORTRAIT_R + 2.0f) * (PORTRAIT_R + 2.0f)) {
             continue;
         }
@@ -1556,9 +1577,14 @@ static void draw_belt(uint8_t *frame, float body_cx, float body_cy, float roll, 
     }
     for (int n = 0; n < ROCKS; ++n) {
         int i = order[n];
+        float lx = rock_x[i] - CX;
+        float ly = rock_y[i] - CY;
+        bool near_side = false;
+        look_around(lx, ly, (rock_depth[i] - 0.72f) * 16.0f, near_side);
+        (void)near_side;
         float sx;
         float sy;
-        to_screen(rock_x[i] - CX, rock_y[i] - CY, body_cx, body_cy, roll, sx, sy);
+        to_screen(lx, ly, body_cx, body_cy, roll, sx, sy);
         draw_rock(frame, sx, sy, rock_rad[i] * (0.65f + 0.35f * rock_depth[i]), rock_depth[i], rock_crater[i] != 0, alpha);
     }
 }

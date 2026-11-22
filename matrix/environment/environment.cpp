@@ -10,8 +10,12 @@
 // At rest the pool is 40 percent of the cup. Sound spreads it a little,
 // then it gathers back to 40 percent.
 // The middle of the pool is darker than the rim.
-// While listening, loudness tints the pool and pitch places a glint.
-// A rise in the sound sends a bright pulse from the shore into the pool.
+// Light gathers in thin lines that drift across the pool. A lean slides
+// those lines toward the low wall.
+// While listening, loudness tints the pool, lifts the lines, speeds their
+// drift, and pitch places a glint.
+// A rise in the sound kinks the lines into a ring that travels from the
+// shore into the pool.
 // The microphone does not change down.
 // Mic and tilt sensitivity come from the settings page.
 // 50 percent is the response tuned in this file.
@@ -22,6 +26,7 @@
 // static below means the helper exists only in this file. The environment_* functions at the bottom are the public ones.
 
 #include "pattern.hpp"
+#include "noise.hpp"
 
 #include "hardware/adc.h"
 #include "hardware/i2c.h"
@@ -52,6 +57,14 @@ constexpr float COLOUR_RMS = 110.0f;
 constexpr float ONSET_RMS = 80.0f;
 constexpr int ONSET_GAP_MS = 200;
 constexpr int RIPPLES = 3;
+// Square pixels, so both axes share a scale. A pool holds a handful of loops.
+constexpr float CAUSTIC_SCALE = 0.13f;
+// Added to the resting drift rate at full loudness. Quiet water stays at 1.
+constexpr float CAUSTIC_SPEED = 2.2f;
+// Noise units per second for a one-g lean. The lines crawl with the pour.
+constexpr float CAUSTIC_SLIDE = 1.35f;
+// A full ripple shifts the sample by about eight pixels across the ring.
+constexpr float CAUSTIC_BEND = 1.05f;
 
 static float zero_x = 0.0f;
 static float zero_y = 0.0f;
@@ -80,6 +93,9 @@ static bool mpu_ready = false;
 static bool mpu_tried = false;
 static uint32_t last_sample_ms = 0;
 static uint32_t last_onset_ms = 0;
+static float caustic_time = 0.0f;
+static float caustic_slide_x = 0.0f;
+static float caustic_slide_y = 0.0f;
 
 struct Ripple {
     float depth;
@@ -331,6 +347,11 @@ static float waterline(float dx, float dy, int want) {
     return (lo + hi) * 0.5f;
 }
 
+// audio_tint eases. heard jumps on the attack. The mix follows both.
+static float caustic_drive() {
+    return audio_tint * 0.65f + heard * 0.35f;
+}
+
 static void step_pool(float dt_s) {
     if (dt_s < 0.001f) {
         return;
@@ -352,6 +373,10 @@ static void step_pool(float dt_s) {
     if (audio_tint < 0.004f) {
         audio_tint = 0.0f;
     }
+    float drive = caustic_drive();
+    caustic_time += dt_s * (1.0f + CAUSTIC_SPEED * drive);
+    caustic_slide_x += flow_x * dt_s * CAUSTIC_SLIDE;
+    caustic_slide_y += flow_y * dt_s * CAUSTIC_SLIDE;
     for (int i = 0; i < RIPPLES; ++i) {
         if (ripples[i].amp <= 0.0f) {
             continue;
@@ -370,6 +395,19 @@ static void step_pool(float dt_s) {
     }
 }
 
+// The pool caustic from https://www.ascii-magic.com/ascii/water-caustics
+// Light sits where a noise field crosses its middle. Two fields cross into a web.
+static float caustic_ridge(float x, float y, int seed) {
+    float n = field_noise(x, y, seed) * 0.65f + field_noise(x * 2.1f, y * 2.1f, seed + 5) * 0.35f;
+    float ridge = 1.0f - fabsf(n - 0.5f) * 2.0f;
+    if (ridge < 0.0f) {
+        return 0.0f;
+    }
+    // Fifth power keeps a line a few pixels wide on this panel.
+    float square = ridge * ridge;
+    return square * square * ridge;
+}
+
 static void paint(uint8_t *frame) {
     int count = pool_count();
     float mag = sqrtf(flow_x * flow_x + flow_y * flow_y);
@@ -377,13 +415,16 @@ static void paint(uint8_t *frame) {
     float radius = sqrtf(count / PI);
     float line = waterline(shore_x, shore_y, count);
     float mid = (PANEL_WIDTH - 1) * 0.5f;
-    float wave_time = clock_ms * 0.003f;
+    float presence = 0.7f + 0.85f * caustic_drive();
     for (int i = 0; i < PANEL_PIXELS * 3; ++i) {
         frame[i] = 0;
     }
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
         float from_mid_y = y - mid;
         float row = y * shore_y;
+        float wy = y * CAUSTIC_SCALE;
+        float w1 = sinf(wy * 1.3f + caustic_time * 0.9f) * 0.35f;
+        float wy_fine = wy * 1.3f;
         for (int x = 0; x < PANEL_WIDTH; ++x) {
             float from_mid_x = x - mid;
             float circle = radius - sqrtf(from_mid_x * from_mid_x + from_mid_y * from_mid_y);
@@ -411,7 +452,6 @@ static void paint(uint8_t *frame) {
                 deep = 1.0f;
             }
             float thick = thickness();
-            float caustic = (0.5f + 0.5f * sinf(x * 0.65f + y * 0.35f + wave_time)) * (1.0f - thick);
             float shine = rim * 0.65f;
             bool on_wall = x == 0 || y == 0 || x == PANEL_WIDTH - 1 || y == PANEL_HEIGHT - 1;
             if (on_wall && depth > 0.0f) {
@@ -438,15 +478,35 @@ static void paint(uint8_t *frame) {
             if (ripple > 1.0f) {
                 ripple = 1.0f;
             }
-            float red = (deep * 6.0f) + rim * (14.0f + shine * 200.0f);
-            float green = 20.0f + (1.0f - deep) * 48.0f + caustic * 14.0f + rim * (80.0f + shine * 50.0f);
-            float blue = 55.0f + (1.0f - deep) * 80.0f + caustic * 12.0f + rim * 50.0f;
+            float dist = radius - circle;
+            float inward_x = shore_x;
+            float inward_y = shore_y;
+            if (dist > 0.8f) {
+                inward_x = -from_mid_x / dist;
+                inward_y = -from_mid_y / dist;
+            }
+            float grad_x = inward_x * (1.0f - pour) + shore_x * pour;
+            float grad_y = inward_y * (1.0f - pour) + shore_y * pour;
+            float bend = ripple * CAUSTIC_BEND;
+            float wx = x * CAUSTIC_SCALE;
+            float w2 = cosf(wx * 1.1f - caustic_time * 0.7f) * 0.35f;
+            float slide_x = caustic_slide_x + grad_x * bend;
+            float slide_y = caustic_slide_y + grad_y * bend;
+            float lines = caustic_ridge(
+                wx + w1 + caustic_time * 0.12f + slide_x,
+                wy + w2 - caustic_time * 0.05f + slide_y,
+                3);
+            lines += 0.8f * caustic_ridge(
+                wx * 1.3f - w2 - caustic_time * 0.09f + slide_x,
+                wy_fine + w1 + caustic_time * 0.1f + slide_y,
+                11);
+            float caustic = lines * presence * (1.0f - deep * 0.45f) * (1.0f - thick);
+            float red = (deep * 6.0f) + rim * (14.0f + shine * 200.0f) + caustic * 30.0f;
+            float green = 20.0f + (1.0f - deep) * 48.0f + rim * (80.0f + shine * 50.0f) + caustic * 58.0f;
+            float blue = 55.0f + (1.0f - deep) * 80.0f + rim * 50.0f + caustic * 52.0f;
             red += audio_tint * (28.0f + rim * 36.0f);
             green += audio_tint * (96.0f + rim * 40.0f);
             blue += audio_tint * 18.0f;
-            red += ripple * 220.0f;
-            green += ripple * 160.0f;
-            blue += ripple * 55.0f;
             red += thick * (70.0f + rim * 90.0f);
             green *= 1.0f - thick * 0.72f;
             blue *= 1.0f - thick * 0.88f;
@@ -574,6 +634,9 @@ void environment_start() {
     splash_goal = 0.0f;
     glint = 0.0f;
     glint_x = (PANEL_WIDTH - 1) * 0.5f;
+    caustic_time = 0.0f;
+    caustic_slide_x = 0.0f;
+    caustic_slide_y = 0.0f;
     mpu_tried = true;
     mpu_ready = init_mpu();
     if (mpu_ready) {

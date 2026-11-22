@@ -1,14 +1,15 @@
 // Boot intro for the xyloscope.
-// A glass BOOT fills with cyan and sways, then flickers out over a starfield.
+// A glass phrase fills with a shifting rainbow and sways, then flickers out over a starfield.
 // The stars speed up, zoom into the centre, and fade. XYLO slides in from the left.
-// SCOPE grows from the centre and lands below it. A rainbow chases the border.
-// The letters fly toward the camera, and the saved pattern fades in.
-// The border is one pixel. The seven rainbow pixels are the length of the chase,
-// so SCOPE stays the same size as XYLO.
+// SCOPE grows from the centre and lands below it. XYLO is blocky and SCOPE is rounded.
+// A rainbow chases the border. The letters fly toward the camera, and the saved pattern fades in.
+// The border is one pixel. The seven rainbow pixels are the length of the chase.
 
 #include <cmath>
 #include <cstdint>
 
+#include "hardware/structs/rosc.h"
+#include "pico/time.h"
 #include "pattern.hpp"
 
 constexpr int BOOT_FILL_MS = 3000;
@@ -71,6 +72,8 @@ struct Stamp {
     int gap;
     int width;
     int height;
+    // 0 is the 5 by 7 glass font. 1 is the block splash word. 2 is the round splash word.
+    int kind;
 };
 
 struct Place {
@@ -99,6 +102,7 @@ struct Bubble {
 
 static bool running = false;
 static uint32_t elapsed = 0;
+static int phrase_index = 0;
 static uint32_t rng = 1;
 static Star stars[STAR_COUNT];
 static Bubble bubbles[BUBBLE_COUNT];
@@ -209,6 +213,42 @@ static const uint8_t *glyph_rows(char code) {
     if (code == 'E') {
         return E;
     }
+    static const uint8_t A[7] = {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11};
+    static const uint8_t D[7] = {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E};
+    static const uint8_t G[7] = {0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F};
+    static const uint8_t I[7] = {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x1F};
+    static const uint8_t N[7] = {0x11, 0x19, 0x15, 0x15, 0x13, 0x11, 0x11};
+    static const uint8_t W[7] = {0x11, 0x11, 0x11, 0x15, 0x15, 0x1B, 0x11};
+    static const uint8_t Z[7] = {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F};
+    static const uint8_t THREE[7] = {0x1E, 0x01, 0x01, 0x0F, 0x01, 0x01, 0x1E};
+    static const uint8_t BANG[7] = {0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x04};
+    if (code == 'A') {
+        return A;
+    }
+    if (code == 'D') {
+        return D;
+    }
+    if (code == 'G') {
+        return G;
+    }
+    if (code == 'I') {
+        return I;
+    }
+    if (code == 'N') {
+        return N;
+    }
+    if (code == 'W') {
+        return W;
+    }
+    if (code == 'Z') {
+        return Z;
+    }
+    if (code == '3') {
+        return THREE;
+    }
+    if (code == '!') {
+        return BANG;
+    }
     return nullptr;
 }
 
@@ -222,15 +262,186 @@ static Stamp make_stamp(const char *text, int sx, int sy, int gap) {
     stamp.sx = sx;
     stamp.sy = sy;
     stamp.gap = gap;
+    stamp.kind = 0;
     int cell = 5 * sx;
     stamp.width = stamp.count * cell + (stamp.count - 1) * gap;
     stamp.height = 7 * sy;
     return stamp;
 }
 
+static Stamp make_splash_stamp(const char *text, int kind) {
+    Stamp stamp = make_stamp(text, 1, 1, 1);
+    stamp.kind = kind;
+    int glyph_w = kind == 1 ? 14 : 11;
+    stamp.width = stamp.count * glyph_w + (stamp.count - 1) * stamp.gap;
+    stamp.height = 28;
+    return stamp;
+}
+
+// 7 by 14 block letters, drawn at 2x so the edges stay straight.
+static bool block_cell(char code, int col, int row) {
+    static const char X[14][8] = {
+        "##...##", "##...##", "##...##", ".##.##.", ".##.##.", "..###..", "..###..",
+        "..###..", "..###..", ".##.##.", ".##.##.", "##...##", "##...##", "##...##",
+    };
+    static const char Y[14][8] = {
+        "##...##", "##...##", "##...##", ".##.##.", ".##.##.", "..###..", "..###..",
+        "..###..", "..###..", "..###..", "..###..", "..###..", "..###..", "..###..",
+    };
+    static const char L[14][8] = {
+        "###....", "###....", "###....", "###....", "###....", "###....", "###....",
+        "###....", "###....", "###....", "#######", "#######", "#######", "#######",
+    };
+    static const char O[14][8] = {
+        "#######", "#######", "##...##", "##...##", "##...##", "##...##", "##...##",
+        "##...##", "##...##", "##...##", "##...##", "##...##", "#######", "#######",
+    };
+    const char (*rows)[8] = nullptr;
+    if (code == 'X') {
+        rows = X;
+    } else if (code == 'Y') {
+        rows = Y;
+    } else if (code == 'L') {
+        rows = L;
+    } else if (code == 'O') {
+        rows = O;
+    }
+    if (rows == nullptr || col < 0 || col > 6 || row < 0 || row > 13) {
+        return false;
+    }
+    return rows[row][col] == '#';
+}
+
+static bool block_word_ink(const Stamp &stamp, int x, int y, int &index) {
+    int advance = 14 + stamp.gap;
+    index = x / advance;
+    if (index < 0 || index >= stamp.count) {
+        return false;
+    }
+    int local = x - index * advance;
+    if (local < 0 || local >= 14) {
+        return false;
+    }
+    return block_cell(stamp.text[index], local / 2, y / 2);
+}
+
+static float ellip(float x, float y, float cx, float cy, float rx, float ry) {
+    float dx = (x - cx) / rx;
+    float dy = (y - cy) / ry;
+    return dx * dx + dy * dy;
+}
+
+static bool ring(float x, float y, float cx, float cy, float rx, float ry, float irx, float iry) {
+    return ellip(x, y, cx, cy, rx, ry) <= 1.0f && ellip(x, y, cx, cy, irx, iry) > 1.0f;
+}
+
+static bool inside_round(float x, float y, float left, float top, float right, float bottom, float rad) {
+    if (x < left || x >= right || y < top || y >= bottom) {
+        return false;
+    }
+    if (x >= left + rad && x < right - rad) {
+        return true;
+    }
+    if (y >= top + rad && y < bottom - rad) {
+        return true;
+    }
+    float cx = x < left + rad ? left + rad : right - rad;
+    float cy = y < top + rad ? top + rad : bottom - rad;
+    float dx = x - cx;
+    float dy = y - cy;
+    return dx * dx + dy * dy <= rad * rad;
+}
+
+static bool scope_o(int x, int y) {
+    float px = x + 0.5f;
+    float py = y + 0.5f;
+    return ring(px, py, 5.5f, 14.0f, 5.3f, 13.4f, 2.5f, 10.2f);
+}
+
+static bool scope_c(int x, int y) {
+    if (!scope_o(x, y)) {
+        return false;
+    }
+    float px = x + 0.5f;
+    float py = y + 0.5f;
+    return ellip(px, py, 9.2f, 14.0f, 4.2f, 6.2f) > 1.0f;
+}
+
+static bool scope_s(int x, int y) {
+    float px = x + 0.5f;
+    float py = y + 0.5f;
+    bool top = ring(px, py, 5.4f, 7.6f, 5.0f, 7.2f, 2.3f, 4.3f);
+    bool bot = ring(px, py, 5.4f, 20.4f, 5.0f, 7.2f, 2.3f, 4.3f);
+    if (top && px > 5.2f && py > 7.2f) {
+        top = false;
+    }
+    if (bot && px < 5.6f && py < 20.8f) {
+        bot = false;
+    }
+    bool join = ellip(px, py, 5.4f, 14.0f, 3.4f, 2.4f) <= 1.0f;
+    return top || bot || join;
+}
+
+static bool scope_p(int x, int y) {
+    float px = x + 0.5f;
+    float py = y + 0.5f;
+    bool stem = px >= 1.2f && px < 4.3f && py >= 1.5f && py < 26.5f;
+    bool cap = ellip(px, py, 2.7f, 25.2f, 2.0f, 2.4f) <= 1.0f;
+    bool bowl = ring(px, py, 5.3f, 8.2f, 4.9f, 7.6f, 2.1f, 4.4f);
+    return stem || cap || bowl;
+}
+
+static bool scope_e(int x, int y) {
+    float px = x + 0.5f;
+    float py = y + 0.5f;
+    bool spine = inside_round(px, py, 0.4f, 0.6f, 5.2f, 27.4f, 2.6f);
+    bool top = inside_round(px, py, 1.0f, 0.6f, 10.6f, 6.4f, 2.4f);
+    bool mid = inside_round(px, py, 1.0f, 11.0f, 9.2f, 17.0f, 2.2f);
+    bool bot = inside_round(px, py, 1.0f, 21.6f, 10.6f, 27.4f, 2.4f);
+    return spine || top || mid || bot;
+}
+
+static bool round_cell(char code, int col, int row) {
+    if (code == 'S') {
+        return scope_s(col, row);
+    }
+    if (code == 'C') {
+        return scope_c(col, row);
+    }
+    if (code == 'O') {
+        return scope_o(col, row);
+    }
+    if (code == 'P') {
+        return scope_p(col, row);
+    }
+    if (code == 'E') {
+        return scope_e(col, row);
+    }
+    return false;
+}
+
+static bool round_word_ink(const Stamp &stamp, int x, int y, int &index) {
+    int advance = 11 + stamp.gap;
+    index = x / advance;
+    if (index < 0 || index >= stamp.count) {
+        return false;
+    }
+    int local = x - index * advance;
+    if (local < 0 || local >= 11) {
+        return false;
+    }
+    return round_cell(stamp.text[index], local, y);
+}
+
 static bool stamp_ink(const Stamp &stamp, int x, int y, int &index) {
     if (x < 0 || y < 0 || x >= stamp.width || y >= stamp.height) {
         return false;
+    }
+    if (stamp.kind == 1) {
+        return block_word_ink(stamp, x, y, index);
+    }
+    if (stamp.kind == 2) {
+        return round_word_ink(stamp, x, y, index);
     }
     int cell = 5 * stamp.sx;
     int advance = cell + stamp.gap;
@@ -496,24 +707,76 @@ static bool grid_at(int x, int y) {
     return false;
 }
 
-static void liquid_cyan(float depth, bool crest, int &red, int &green, int &blue) {
-    if (crest) {
-        red = 230;
-        green = 255;
-        blue = 255;
-        return;
+struct BootPhrase {
+    const char *upper;
+    int upper_sx;
+    int upper_sy;
+    int upper_gap;
+    const char *lower;
+    int lower_sx;
+    int lower_sy;
+    int lower_gap;
+};
+
+static const BootPhrase PHRASES[] = {
+    {"BOOTING", 2, 5, 2, nullptr, 0, 0, 0},
+    {"LOADING", 2, 5, 2, nullptr, 0, 0, 0},
+    {"PAINTING", 2, 5, 2, nullptr, 0, 0, 0},
+    {"NOW IN", 2, 3, 2, "3D!", 4, 5, 2},
+    {"BEEP", 2, 4, 2, "BOOP", 2, 4, 2},
+    {"WOWZA", 2, 5, 2, nullptr, 0, 0, 0},
+};
+
+constexpr int PHRASE_COUNT = 6;
+
+struct PlacedLine {
+    Stamp stamp;
+    float left;
+    float top;
+};
+
+// One full turn of the liquid hue about every 0.7 seconds.
+static void hue_rgb(float turns, float sat, float value, int &red, int &green, int &blue) {
+    float h = turns - floorf(turns);
+    if (h < 0.0f) {
+        h += 1.0f;
     }
-    if (depth < 0.35f) {
-        float t = depth / 0.35f;
-        red = mix_channel(186, CYAN_R, t);
-        green = mix_channel(248, CYAN_G, t);
-        blue = mix_channel(255, CYAN_B, t);
-        return;
+    float sector = h * 6.0f;
+    int index = (int)sector;
+    if (index > 5) {
+        index = 5;
     }
-    float t = (depth - 0.35f) / 0.65f;
-    red = mix_channel(CYAN_R, 8, t);
-    green = mix_channel(CYAN_G, 28, t);
-    blue = mix_channel(CYAN_B, 72, t);
+    float frac = sector - (float)index;
+    float p = value * (1.0f - sat);
+    float q = value * (1.0f - frac * sat);
+    float t = value * (1.0f - (1.0f - frac) * sat);
+    float r = value;
+    float g = t;
+    float b = p;
+    if (index == 1) {
+        r = q;
+        g = value;
+        b = p;
+    } else if (index == 2) {
+        r = p;
+        g = value;
+        b = t;
+    } else if (index == 3) {
+        r = p;
+        g = q;
+        b = value;
+    } else if (index == 4) {
+        r = t;
+        g = p;
+        b = value;
+    } else if (index == 5) {
+        r = value;
+        g = p;
+        b = q;
+    }
+    red = clamp_channel(r * 255.0f);
+    green = clamp_channel(g * 255.0f);
+    blue = clamp_channel(b * 255.0f);
 }
 
 static void paint_boot(uint8_t *frame, bool over_stars) {
@@ -527,7 +790,14 @@ static void paint_boot(uint8_t *frame, bool over_stars) {
     if (gain < 0.02f) {
         return;
     }
-    Stamp boot = make_stamp("BOOT", 2, 4, 2);
+    const BootPhrase &phrase = PHRASES[phrase_index];
+    PlacedLine lines[2];
+    lines[0].stamp = make_stamp(phrase.upper, phrase.upper_sx, phrase.upper_sy, phrase.upper_gap);
+    int line_count = 1;
+    if (phrase.lower != nullptr) {
+        lines[1].stamp = make_stamp(phrase.lower, phrase.lower_sx, phrase.lower_sy, phrase.lower_gap);
+        line_count = 2;
+    }
     // A few degrees, so the glass stays on the panel while it sways.
     float sec = elapsed * 0.001f;
     float ang = sinf(sec * 1.7f) * 0.09f;
@@ -535,49 +805,82 @@ static void paint_boot(uint8_t *frame, bool over_stars) {
     float fill = span_u(0, BOOT_FILL_MS);
     float cosine = cosf(ang);
     float sine = sinf(ang);
+    float cy = 31.5f + bob;
+    constexpr float LINE_GAP = 4.0f;
+    float block_h = (float)lines[0].stamp.height;
+    if (line_count == 2) {
+        block_h += LINE_GAP + (float)lines[1].stamp.height;
+    }
+    float block_top = cy - block_h * 0.5f;
+    lines[0].left = 31.5f - lines[0].stamp.width * 0.5f;
+    lines[0].top = block_top;
+    if (line_count == 2) {
+        lines[1].left = 31.5f - lines[1].stamp.width * 0.5f;
+        lines[1].top = block_top + (float)lines[0].stamp.height + LINE_GAP;
+    }
+    float turns = sec / 0.7f;
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
         for (int x = 0; x < PANEL_WIDTH; ++x) {
             if (grid_at(x, y)) {
                 put(frame, x, y, 14, 42, 58, gain);
             }
             float dx = (x + 0.5f) - 31.5f;
-            float dy = (y + 0.5f) - 31.5f - bob;
-            float rx = dx * cosine + dy * sine;
-            float ry = -dx * sine + dy * cosine;
-            float wx = rx + boot.width * 0.5f;
-            float wy = ry + boot.height * 0.5f;
-            if (wx < -1.0f || wy < -1.0f || wx > boot.width + 1.0f || wy > boot.height + 1.0f) {
-                continue;
-            }
-            int ix = (int)floorf(wx);
-            int iy = (int)floorf(wy);
-            int index = 0;
-            if (stamp_ink(boot, ix, iy, index)) {
-                float slosh = sinf(ix * 0.35f - sec * 3.2f) * 1.6f * (1.0f - fill);
-                float surf = (1.0f - fill) * (float)boot.height + slosh;
-                int red = 10;
-                int green = 18;
-                int blue = 32;
-                if (iy + 0.5f >= surf) {
-                    float depth = (iy + 0.5f - surf) / (float)boot.height;
-                    bool crest = (iy + 0.5f - surf) < 1.3f;
-                    liquid_cyan(depth, crest, red, green, blue);
-                    for (int i = 0; i < BUBBLE_COUNT; ++i) {
-                        float travel = fmodf(bubbles[i].phase + sec * bubbles[i].speed, (float)boot.height);
-                        float by = (float)boot.height - travel;
-                        float bx = (float)ix - bubbles[i].x;
-                        float by_off = (float)iy - by;
-                        if (bx * bx + by_off * by_off < 1.4f && by > surf) {
-                            red = 220;
-                            green = 255;
-                            blue = 255;
-                            break;
+            float dy = (y + 0.5f) - cy;
+            float px = 31.5f + dx * cosine + dy * sine;
+            float py = cy + -dx * sine + dy * cosine;
+            for (int line = 0; line < line_count; ++line) {
+                float wx = px - lines[line].left;
+                float wy = py - lines[line].top;
+                float width = (float)lines[line].stamp.width;
+                float height = (float)lines[line].stamp.height;
+                if (wx < -1.0f || wy < -1.0f || wx > width + 1.0f || wy > height + 1.0f) {
+                    continue;
+                }
+                int ix = (int)floorf(wx);
+                int iy = (int)floorf(wy);
+                int index = 0;
+                if (stamp_ink(lines[line].stamp, ix, iy, index)) {
+                    float slosh = sinf(px * 0.35f - sec * 3.2f) * 1.6f * (1.0f - fill);
+                    float surf = block_top + (1.0f - fill) * block_h + slosh;
+                    int red = 0;
+                    int green = 0;
+                    int blue = 0;
+                    hue_rgb(turns, 0.45f, 0.16f, red, green, blue);
+                    if (py >= surf) {
+                        float depth = (py - surf) / block_h;
+                        if (depth < 0.0f) {
+                            depth = 0.0f;
+                        }
+                        if (depth > 1.0f) {
+                            depth = 1.0f;
+                        }
+                        bool crest = (py - surf) < 1.3f;
+                        float value = crest ? 1.0f : 1.0f - depth * 0.62f;
+                        float sat = crest ? 0.28f : 0.88f;
+                        hue_rgb(turns, sat, value, red, green, blue);
+                        for (int i = 0; i < BUBBLE_COUNT; ++i) {
+                            float travel = fmodf(bubbles[i].phase + sec * bubbles[i].speed, block_h);
+                            float by = block_top + block_h - travel;
+                            float bx = lines[line].left + bubbles[i].x * (width / 40.0f);
+                            float off_x = px - bx;
+                            float off_y = py - by;
+                            if (off_x * off_x + off_y * off_y < 1.4f && by > surf) {
+                                hue_rgb(turns, 0.08f, 1.0f, red, green, blue);
+                                break;
+                            }
                         }
                     }
+                    put(frame, x, y, red, green, blue, gain);
+                    break;
                 }
-                put(frame, x, y, red, green, blue, gain);
-            } else if (near_ink(boot, ix, iy)) {
-                put(frame, x, y, 186, 226, 234, gain);
+                if (near_ink(lines[line].stamp, ix, iy)) {
+                    int red = 0;
+                    int green = 0;
+                    int blue = 0;
+                    hue_rgb(turns, 0.22f, 0.88f, red, green, blue);
+                    put(frame, x, y, red, green, blue, gain);
+                    break;
+                }
             }
         }
     }
@@ -952,15 +1255,17 @@ static void paint_splash(uint8_t *frame) {
     fill_frame(frame, FIELD_R, FIELD_G, FIELD_B, field);
     paint_border(frame, border_alpha, flash);
 
-    Stamp xylo = make_stamp("XYLO", 2, 2, 1);
-    Stamp scope = make_stamp("SCOPE", 2, 2, 1);
+    Stamp xylo = make_splash_stamp("XYLO", 1);
+    Stamp scope = make_splash_stamp("SCOPE", 2);
     float enter = span_u(SPLASH_AT, ENTER_MS);
     float inv = 1.0f - enter;
     float ease = 1.0f - inv * inv * inv;
     Place xylo_at;
     Place scope_at;
-    rest_place(xylo_at, (float)((PANEL_WIDTH - xylo.width) / 2), 9.0f, (float)xylo.width, (float)xylo.height);
-    rest_place(scope_at, (float)((PANEL_WIDTH - scope.width) / 2), 41.0f, (float)scope.width, (float)scope.height);
+    // 28px tall, one pixel clear of the border, with a 2px gap between the words.
+    float word_left = (float)((PANEL_WIDTH - xylo.width) / 2);
+    rest_place(xylo_at, word_left, 3.0f, (float)xylo.width, (float)xylo.height);
+    rest_place(scope_at, word_left, 33.0f, (float)scope.width, (float)scope.height);
     if (elapsed < (uint32_t)CHASE_AT) {
         xylo_at.shift = (1.0f - ease) * -(xylo_at.left + (float)xylo.width + 8.0f);
         scope_at.ox = 31.5f;
@@ -992,6 +1297,11 @@ static void paint_splash(uint8_t *frame) {
 void intro_start() {
     running = true;
     elapsed = 0;
+    uint32_t bits = 0;
+    for (int i = 0; i < 32; ++i) {
+        bits = (bits << 1) | (rosc_hw->randombit & 1u);
+    }
+    phrase_index = (int)((bits ^ time_us_32()) % (uint32_t)PHRASE_COUNT);
     seed_stars();
     seed_bubbles();
 }

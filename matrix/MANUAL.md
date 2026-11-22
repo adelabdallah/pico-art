@@ -15,7 +15,7 @@ This file follows the firmware in this directory. When a pin, a pattern, or a bu
 | DaierTek SPST rocker | On-off for the whole setup, including a later build of up to four panels. Waterproof toggle with a red safety cover. 20 A at 125 V AC, 15 A at 250 V AC. Two pins, in the AC feed of the 5 V supply. | https://www.amazon.ca/dp/B07T6YNRZS |
 | FainWan MT3608 step-up modules | 12 V for the button LEDs. A pack of five. Each takes 2 V to 24 V in and can raise it as high as 28 V, at up to 2 A. Set the output to 12 V from the panel 5 V supply. | https://www.amazon.ca/dp/B09LM83XBF |
 | 128×64 SSD1306 OLED | Names the pattern and the open setting. The top 16 rows are the yellow band. The lower rows are blue. | I2C1, GP14 SDA, GP15 SCL, address `0x3C`. |
-| MPU-6050 | Tilt. Liquid pours with it. Galaxy tilts its disk with it. Solar looks around the orrery with it. | Same I2C bus as the OLED, address `0x68`. |
+| MPU-6050 | Tilt. Liquid pours with it. Galaxy tilts its disk with it. Solar looks around the orrery and around each world with it. | Same I2C bus as the OLED, address `0x68`. |
 | Analogue microphone | Loudness and pitch for liquid. The module name is absent from the firmware. | GP27, ADC input 1. |
 | Five momentary buttons | Red, orange, yellow, green, and blue. Each button also has an LED on the 12 V feed above. | Each switch common goes to its GPIO. Each normally open contact goes to ground. The pin pull-up makes a press read as low. The LEDs take 12 V from an MT3608 set to 12 V. |
 | Quadrature encoder with a click | Pattern list, sideways fling, and the controls named per pattern below. | A is GP16, B is GP17, click is GP18. Each goes to ground. Clockwise is A changing before B. |
@@ -70,9 +70,9 @@ The panel timer choices are 1, 2, 5, 10, 15, 30, and 60 minutes, then a forever 
 
 Boot plays an intro, then fades in the saved pattern. With a blank memory that pattern is plasma.
 
-A glass word, BOOT, fills with cyan over 3 seconds and sways a little. It then flickers, slowly and then quickly, and fades over 1 second. A starfield shows through that flicker. The stars speed up over 1 second, rush into the centre, and fade to black over 1 second.
+A glass phrase fills over 3 seconds and sways a little. The liquid inside shifts through a rainbow, one turn about every 0.7 seconds. Each boot picks one phrase at random: BOOTING, LOADING, PAINTING, NOW IN 3D!, BEEP BOOP, or WOWZA. NOW IN 3D! is two lines, with 3D! larger and underneath. BEEP BOOP is two lines of the same size. A phrase that is wider than the panel runs off the edge. The word then flickers, slowly and then quickly, and fades over 1 second. A starfield shows through that flicker. The stars speed up over 1 second, rush into the centre, and fade to black over 1 second.
 
-XYLO slides in from the left across the top half. SCOPE grows out of the centre and lands on the lower half. Both have landed after about 1.2 seconds. XYLO is red, yellow, green, then blue. SCOPE is chrome. A rainbow of seven colours chases the border for 2 seconds. The border is one pixel wide, and both words fill while the rainbow runs. A small pop follows, and a gold shine sweeps the whole panel from the top left to the bottom right. The rainbow border then locks and holds. The letters fly toward the camera, and the saved pattern fades in over 2 seconds.
+XYLO slides in from the left across the top half. SCOPE grows out of the centre and lands on the lower half. Both have landed after about 1.2 seconds. The letters are 28 pixels tall and fill the middle of the panel, one pixel clear of the border. XYLO is blocky, with straight edges. SCOPE has rounded edges. Both words are the same height. XYLO is red, yellow, green, then blue. SCOPE is chrome. A rainbow of seven colours chases the border for 2 seconds. The border is one pixel wide, and both words fill while the rainbow runs. A small pop follows, and a gold shine sweeps the whole panel from the top left to the bottom right. The rainbow border then locks and holds. The letters fly toward the camera, and the saved pattern fades in over 2 seconds.
 
 Red skips the intro at any moment, including the fade. The saved pattern appears on the next frame, already running. After the intro, red pauses the picture again. The other buttons and the encoder wait until the intro ends. The OLED yellow band reads XYLOSCOPE for the whole intro.
 
@@ -108,7 +108,7 @@ Plasma is 1. Settings and the reset prompts have no number. The yellow band show
 | 7 | flow field | Particles trace a slowly turning noise field. Colour follows the direction they travel. |
 | 8 | voronoi cells | Fourteen drifting seeds and the regions they claim, shaded like stained glass. |
 | 9 | loop | Langton's loop. A generation that changes nothing plants the loop at a new spot. |
-| 10 | liquid | A square cup seen from above. Tilt pours a pool against the low walls. Sound spreads the pool, tints it, and places a glint. |
+| 10 | liquid | A square cup seen from above. Tilt pours a pool against the low walls and slides a web of light toward the low side. Sound spreads the pool, tints it, places a glint, and bends that web into a ring. |
 | 11 | pipes | Perspective pipes in a box. Each pipe is a shaded cylinder. The box clears when it fills. |
 | 12 | reef | Coral, rock, and open water, with fish and larger animals. Sunbeams stop when they meet rock. |
 | 13 | solar | An orrery on the wide view, and a close portrait of each world. The stops run from the wide view through the sun, the planets, the belt, and Pluto, then back. |
@@ -129,7 +129,7 @@ Plasma, warp, feedback, metaballs, reaction, life, flow field, voronoi cells, lo
 
 Yellow starts and stops the microphone. Listening starts on. Orange still adds a diagonal mirror. The other shared controls stay.
 
-Tilt pours the pool. Flat and face up holds the pool in the middle. Microphone sensitivity and tilt sensitivity are on the settings page. 50 percent is the response tuned for this pattern.
+Tilt pours the pool and slides the light in it toward the low side. Flat and face up holds the pool in the middle, and the web drifts there on its own. A sound spreads the pool and bends the web into a ring. Microphone sensitivity and tilt sensitivity are on the settings page. 50 percent is the response tuned for this pattern.
 
 ### Solar
 
@@ -141,11 +141,11 @@ Green flings the current world's spin, or the whole orrery on the wide view. On 
 
 Orange steps outward. On a world, it returns to the wide orrery. On the wide orrery, it pulls back over about two seconds until the system sits on the outer tip of one spiral arm, and the pattern becomes galaxy when the picture arrives. A second press during that flight turns it around and brings it back along the same path.
 
-Yellow starts a tour. The wide view, the sun, each planet, the belt, and Pluto each hold for 5 seconds, and then the tour repeats. The view tumbles slowly, the way a gentle tilt of the panel looks around the orrery and around each world. The world stays in the centre while its surface turns. The Moon and Charon speed up while the tour runs. Another press stops the tour. While it runs, a play mark bobs in the bottom right of the OLED.
+Yellow starts a tour. The wide view, the sun, each planet, the belt, and Pluto each hold for 5 seconds, and then the tour repeats. The view tumbles slowly, the way a gentle tilt of the panel looks around the orrery and around each world. The nod is the large swing, so the poles pass through the disc. The world stays in the centre. The Moon and Charon speed up and move with their planet. Another press stops the tour. While it runs, a play mark bobs in the bottom right of the OLED.
 
 Blue keeps the shared hue shift.
 
-On the wide view, tipping the panel looks around the hoops. Flat and face up is the resting view. During the tour the tumble replaces that look until the tour stops.
+Tipping the panel looks around the hoops, and around a close-up the same way. The world stays in the centre. Flat and face up is the resting view. During the tour the tumble replaces that look until the tour stops.
 
 ### Campfire
 
