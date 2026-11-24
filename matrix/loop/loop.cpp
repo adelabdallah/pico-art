@@ -295,17 +295,15 @@ static uint8_t at(const uint8_t *cells, int x, int y) {
 
 // One byte per neighbourhood. A neighbourhood with no rule stays 0.
 // Walking the rule list once per cell could not keep up on a 128 by 64 panel.
-static uint8_t rule_table[8 * 8 * 8 * 8 * 8];
-static bool rules_ready = false;
+// The table lives in the pattern arena. A permanent copy is 32 KB, and four
+// panels need that room for the scan buffers.
+static uint8_t *rule_table = nullptr;
 
 static int rule_index(uint8_t centre, uint8_t top, uint8_t right, uint8_t bottom, uint8_t left) {
     return ((centre & 7) << 12) | ((top & 7) << 9) | ((right & 7) << 6) | ((bottom & 7) << 3) | (left & 7);
 }
 
 static void build_rules() {
-    if (rules_ready) {
-        return;
-    }
     // Later rules are stored first so the earliest match in the list wins.
     for (int i = RULE_COUNT - 1; i >= 0; --i) {
         Rule rule = rules[i];
@@ -322,7 +320,6 @@ static void build_rules() {
             turn_top = next_top;
         }
     }
-    rules_ready = true;
 }
 
 static uint8_t next_state(uint8_t centre, uint8_t top, uint8_t right, uint8_t bottom, uint8_t left) {
@@ -384,6 +381,7 @@ static void paint_loop(uint8_t *pixels) {
 void loop_start() {
     grid[0] = pattern_alloc(PANEL_PIXELS);
     grid[1] = pattern_alloc(PANEL_PIXELS);
+    rule_table = pattern_alloc(8 * 8 * 8 * 8 * 8);
     rng = time_us_32() | 1u;
     pending_ms = 0;
     build_rules();

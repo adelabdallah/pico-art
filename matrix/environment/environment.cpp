@@ -34,6 +34,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 
 static int rest_count() { return (PANEL_PIXELS * 40) / 100; }
 constexpr int SPLASH_MAX = 820;

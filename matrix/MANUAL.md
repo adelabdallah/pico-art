@@ -40,13 +40,13 @@ USB is at the top. The left column runs down the left header, and the right colu
     B2            GP5  |   2W   |  GP28  free, ADC2
                   GND  |        |  GND
     A             GP6  |        |  GP27  microphone, ADC1
-    B             GP7  |        |  GP26  green, ADC0
+    B             GP7  |        |  GP26  green C, ADC0
     C             GP8  |        |  RUN
-    D             GP9  |        |  GP22  blue
+    D             GP9  |        |  GP22  blue C
     E             GP10 |        |  GND
-                  GND  |        |  GP21  orange
-    CLK           GP11 |        |  GP20  yellow
-    LAT           GP12 |        |  GP19  red
+                  GND  |        |  GP21  orange C
+    CLK           GP11 |        |  GP20  yellow C
+    LAT           GP12 |        |  GP19  red C
     OE            GP13 |        |  GND
                   GND  |        |  GP18  encoder click
     SDA OLED+MPU  GP14 |        |  GP17  encoder B
