@@ -284,7 +284,7 @@ static SettingRow setting_rows[] = {
     {"PANELS:", OledIcon::Axes},
 };
 
-static Settings settings = {0, BRIGHTNESS_PERCENT, 0.0f, 50, 50, 100, LED_TIMER_DEFAULT, OLED_TIMER_DEFAULT, 1, DBL_DEFAULT_MS, 0, 1};
+static Settings settings = {0, BRIGHTNESS_PERCENT, 0.0f, 50, 50, 100, LED_TIMER_DEFAULT, OLED_TIMER_DEFAULT, 1, DBL_DEFAULT_MS, 0, 2};
 static uint32_t anim_ms = 0;
 static float anim_frac = 0.0f;
 static bool matrix_blank = false;

@@ -56,7 +56,7 @@ Four panels are powered as two pairs. Each pair takes one +V and one −V from t
 
 ## Panels
 
-The panel count is a stored setting. The choices are 1, 2, and 4. A new board, and any board whose saved settings are older than this setting, boots as 1. Changing it saves at once and takes effect on the next boot. The scan locks the chain length when it starts, so the picture stays wrong until that reboot. The OLED and the encoder still work while the picture is wrong, which is how the count gets changed.
+The panel count is a stored setting. The choices are 1, 2, and 4. While the buttons are unwired, a new board, and any board whose saved settings are older than this setting, boots as 2. Changing it saves at once and takes effect on the next boot. The scan locks the chain length when it starts, so the picture stays wrong until that reboot. The OLED and the encoder still work while the picture is wrong, which is how the count gets changed.
 
 One panel is 64 by 64. Two panels are 128 wide by 64 tall. From the front, the Pico's panel is the right one and the HUB75 cable runs left. Four panels are 128 by 128. From the front, the Pico's panel is the bottom right. The cable runs left, then up, then right. Every panel stays upright, with the same edge up.
 
@@ -208,7 +208,7 @@ The values, in order:
 | Double click | 200 to 800 milliseconds, in steps of 50 | 400 milliseconds |
 | Panel timer | 1, 2, 5, 10, 15, 30, 60 minutes, or forever | Forever |
 | OLED timer | 1, 2, 5, 10, 15, 30, or 60 minutes | 2 minutes |
-| Panels | 1, 2, or 4 | 1 |
+| Panels | 1, 2, or 4 | 2 |
 
 Panels is the chain length. 1 is one 64 by 64 panel. 2 is a 128 by 64 pair, Pico on the right, cable running left. 4 is a 128 by 128 square, Pico on the bottom right, cable left, then up, then right. The new count is stored when the encoder changes it, and the picture uses it on the next boot.
 

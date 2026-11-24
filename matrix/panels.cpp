@@ -6,10 +6,10 @@
 #include <cstdlib>
 #include <cstring>
 
-int PANEL_WIDTH = 64;
+int PANEL_WIDTH = 128;
 int PANEL_HEIGHT = 64;
-int PANEL_PIXELS = 64 * 64;
-int PANEL_COUNT = 1;
+int PANEL_PIXELS = 128 * 64;
+int PANEL_COUNT = 2;
 
 static uint8_t *picture = nullptr;
 static uint8_t *turned_buf = nullptr;
