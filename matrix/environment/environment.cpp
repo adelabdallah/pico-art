@@ -145,6 +145,22 @@ static bool init_mpu() {
     return true;
 }
 
+// The chip shares i2c1 with the OLED, GP14 and GP15. A miss is reported once.
+static bool wake_mpu() {
+    if (mpu_ready) {
+        return true;
+    }
+    if (mpu_tried) {
+        return false;
+    }
+    mpu_tried = true;
+    mpu_ready = init_mpu();
+    if (!mpu_ready) {
+        printf("imu not found\n");
+    }
+    return mpu_ready;
+}
+
 static void capture_zero() {
     int32_t sum_x = 0;
     int32_t sum_y = 0;
@@ -600,11 +616,7 @@ static bool read_gravity(float &x_g, float &y_g, float &z_g) {
 }
 
 bool environment_gravity(float &x_g, float &y_g, float &z_g) {
-    if (!mpu_ready && !mpu_tried) {
-        mpu_tried = true;
-        mpu_ready = init_mpu();
-    }
-    if (!mpu_ready) {
+    if (!wake_mpu()) {
         return false;
     }
     return read_gravity(x_g, y_g, z_g);
@@ -638,9 +650,7 @@ void environment_start() {
     caustic_time = 0.0f;
     caustic_slide_x = 0.0f;
     caustic_slide_y = 0.0f;
-    mpu_tried = true;
-    mpu_ready = init_mpu();
-    if (mpu_ready) {
+    if (wake_mpu()) {
         capture_zero();
     }
     adc_init();

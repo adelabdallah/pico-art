@@ -1,4 +1,4 @@
-// Langton's loop on the 64 by 64 grid.
+// Langton's loop on the whole panel.
 // Eight states and a rule table grow a sheath that builds a copy of the loop.
 // A generation that changes nothing clears the board and plants the loop
 // at a new spot that fits on the panel.
@@ -293,29 +293,45 @@ static uint8_t at(const uint8_t *cells, int x, int y) {
     return cells[y * PANEL_WIDTH + x];
 }
 
-static uint8_t next_state(uint8_t centre, uint8_t top, uint8_t right, uint8_t bottom, uint8_t left) {
-    uint8_t turns[4][4] = {
-        {top, right, bottom, left},
-        {left, top, right, bottom},
-        {bottom, left, top, right},
-        {right, bottom, left, top},
-    };
-    for (int i = 0; i < RULE_COUNT; ++i) {
+// One byte per neighbourhood. A neighbourhood with no rule stays 0.
+// Walking the rule list once per cell could not keep up on a 128 by 64 panel.
+static uint8_t rule_table[8 * 8 * 8 * 8 * 8];
+static bool rules_ready = false;
+
+static int rule_index(uint8_t centre, uint8_t top, uint8_t right, uint8_t bottom, uint8_t left) {
+    return ((centre & 7) << 12) | ((top & 7) << 9) | ((right & 7) << 6) | ((bottom & 7) << 3) | (left & 7);
+}
+
+static void build_rules() {
+    if (rules_ready) {
+        return;
+    }
+    // Later rules are stored first so the earliest match in the list wins.
+    for (int i = RULE_COUNT - 1; i >= 0; --i) {
         Rule rule = rules[i];
-        if (rule.centre != centre) {
-            continue;
-        }
+        uint8_t turn_top = rule.top;
+        uint8_t turn_right = rule.right;
+        uint8_t turn_bottom = rule.bottom;
+        uint8_t turn_left = rule.left;
         for (int turn = 0; turn < 4; ++turn) {
-            if (rule.top == turns[turn][0] && rule.right == turns[turn][1] && rule.bottom == turns[turn][2] && rule.left == turns[turn][3]) {
-                return rule.next;
-            }
+            rule_table[rule_index(rule.centre, turn_top, turn_right, turn_bottom, turn_left)] = rule.next;
+            uint8_t next_top = turn_left;
+            turn_left = turn_bottom;
+            turn_bottom = turn_right;
+            turn_right = turn_top;
+            turn_top = next_top;
         }
     }
-    return 0;
+    rules_ready = true;
+}
+
+static uint8_t next_state(uint8_t centre, uint8_t top, uint8_t right, uint8_t bottom, uint8_t left) {
+    return rule_table[rule_index(centre, top, right, bottom, left)];
 }
 
 static void place_seed() {
-    memset(grid, 0, sizeof grid);
+    memset(grid[0], 0, (size_t)PANEL_PIXELS);
+    memset(grid[1], 0, (size_t)PANEL_PIXELS);
     shown = 0;
     int y0 = (int)(next_bits() % (uint32_t)(PANEL_HEIGHT - SEED_HEIGHT + 1));
     int x0 = (int)(next_bits() % (uint32_t)(PANEL_WIDTH - SEED_WIDTH + 1));
@@ -370,6 +386,7 @@ void loop_start() {
     grid[1] = pattern_alloc(PANEL_PIXELS);
     rng = time_us_32() | 1u;
     pending_ms = 0;
+    build_rules();
     place_seed();
 }
 

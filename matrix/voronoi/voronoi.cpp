@@ -93,17 +93,19 @@ void voronoi_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
         Seed &seed = seeds[i];
         float x = seed.cx + sinf(seconds * seed.fx * TAU * 0.5f + seed.phase) * seed.ax;
         float y = seed.cy + cosf(seconds * seed.fy * TAU * 0.5f + seed.phase * 1.7f) * seed.ay;
+        float max_x = (float)PANEL_WIDTH - 2.5f;
+        float max_y = (float)PANEL_HEIGHT - 2.5f;
         if (x < 1.5f) {
             x = 1.5f;
         }
         if (y < 1.5f) {
             y = 1.5f;
         }
-        if (x > 61.5f) {
-            x = 61.5f;
+        if (x > max_x) {
+            x = max_x;
         }
-        if (y > 61.5f) {
-            y = 61.5f;
+        if (y > max_y) {
+            y = max_y;
         }
         sx[i] = x;
         sy[i] = y;

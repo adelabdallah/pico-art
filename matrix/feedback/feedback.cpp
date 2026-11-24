@@ -91,5 +91,5 @@ void feedback_draw(uint8_t *pixels, uint32_t anim_ms, int dt_ms) {
             pixel += 3;
         }
     }
-    memcpy(history, pixels, sizeof history);
+    memcpy(history, pixels, (size_t)PANEL_PIXELS * 3);
 }

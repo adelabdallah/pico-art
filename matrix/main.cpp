@@ -1142,9 +1142,17 @@ static void rotate_view(uint8_t *pixels) {
     if (error < 0.0f) {
         error = -error;
     }
-    if (gap < 0.02f && error < 0.02f && PANEL_WIDTH == PANEL_HEIGHT) {
-        rotate_exact(pixels, nearest);
-        return;
+    // A settled full turn is the picture already in the buffer.
+    // Two panels are wider than they are tall, and the sampler below wraps
+    // every edge. That paints the bottom rows back along the top.
+    if (gap < 0.02f && error < 0.02f) {
+        if (nearest % 4 == 0) {
+            return;
+        }
+        if (PANEL_WIDTH == PANEL_HEIGHT) {
+            rotate_exact(pixels, nearest);
+            return;
+        }
     }
     float cosine = cosf(view_angle);
     float sine = sinf(view_angle);

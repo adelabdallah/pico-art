@@ -17,7 +17,8 @@ This file follows the firmware in this directory. When a pin, a pattern, or a bu
 | 128×64 SSD1306 OLED | Names the pattern and the open setting. The top 16 rows are the yellow band. The lower rows are blue. | I2C1, GP14 SDA, GP15 SCL, address `0x3C`. |
 | MPU-6050 | Tilt. Liquid pours with it. Galaxy tilts its disk with it. Solar looks around the orrery and around each world with it. | Same I2C bus as the OLED, address `0x68`. |
 | Analogue microphone | Loudness and pitch for liquid. The module name is absent from the firmware. | GP27, ADC input 1. |
-| Five momentary buttons | Red, orange, yellow, green, and blue. Each button also has an LED on the 12 V feed above. | Each switch common goes to its GPIO. Each normally open contact goes to ground. The pin pull-up makes a press read as low. The LEDs take 12 V from an MT3608 set to 12 V. |
+| Five momentary buttons | Red, orange, yellow, green, and blue. Each button also has an LED on the 12 V feed above. | Each switch common goes to its GPIO. Each normally open contact goes to ground. The pin pull-up makes a press read as low. On the blue button, ground is the yellow wire. If a button behaves as if it is being held, try yellow for ground. The LEDs take 12 V from an MT3608 set to 12 V. |
+| BAOMAIN 5-pin button harness | One plug on each momentary button. The lead is 15 cm, and the ends are stripped. https://www.amazon.ca/dp/B09NN28Q1B | Red is the lamp positive, and black is the lamp negative. Green is the switch common and goes to that button's GPIO. Blue is the normally open contact and goes to ground. Yellow is the normally closed contact, closed to green while the button is up. On the blue button, ground is the yellow wire. If a button behaves as if it is being held, try yellow for ground. |
 | Quadrature encoder with a click | Pattern list, sideways fling, and the controls named per pattern below. | A is GP16, B is GP17, click is GP18. Each goes to ground. Clockwise is A changing before B. |
 
 ## Pins
@@ -51,6 +52,8 @@ USB is at the top. The left column runs down the left header, and the right colu
     SDA OLED+MPU  GP14 |        |  GP17  encoder B
     SCL OLED+MPU  GP15 |        |  GP16  encoder A
 ```
+
+A PiCowBell proto board's STEMMA port is tied to GP4 and GP5. Those pins are the panel's G2 and B2, so the MPU-6050 cannot use that port. Plug the sensor onto the OLED bus, GP14 and GP15, at address `0x68`. Leave the STEMMA port empty while the panels are wired, because the sensor pull-ups hold the lower half's green and blue.
 
 Four panels are powered as two pairs. Each pair takes one +V and one −V from the Velainwom supply. That pair's 5 V leads are joined to one fork, and its grounds are joined to the other. Both pairs can be on together. The Pico shares any GND pin with the supply's −V. While the pairs are still on separate HUB75 chains, each pair has its own Pico 2W, and both share that ground. The OLED and the MPU-6050 share GP14 and GP15.
 
