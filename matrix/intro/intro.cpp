@@ -464,9 +464,10 @@ static bool stamp_ink(const Stamp &stamp, int x, int y, int &index) {
     return (rows[row] & (uint8_t)(0x10 >> col)) != 0;
 }
 
-static bool near_ink(const Stamp &stamp, int x, int y) {
-    for (int dy = -1; dy <= 1; ++dy) {
-        for (int dx = -1; dx <= 1; ++dx) {
+// radius 1 is the coloured edge on the letters. radius 2 is the white edge outside that.
+static bool near_ink(const Stamp &stamp, int x, int y, int radius) {
+    for (int dy = -radius; dy <= radius; ++dy) {
+        for (int dx = -radius; dx <= radius; ++dx) {
             if (dx == 0 && dy == 0) {
                 continue;
             }
@@ -877,7 +878,8 @@ static void paint_boot(uint8_t *frame, bool over_stars) {
                 float scale = lines[line].scale;
                 float width = (float)lines[line].stamp.width * scale;
                 float height = (float)lines[line].stamp.height * scale;
-                if (wx < -1.0f || wy < -1.0f || wx > width + 1.0f || wy > height + 1.0f) {
+                float pad = 2.0f * scale + 1.0f;
+                if (wx < -pad || wy < -pad || wx > width + pad || wy > height + pad) {
                     continue;
                 }
                 float sx = wx / scale;
@@ -919,12 +921,16 @@ static void paint_boot(uint8_t *frame, bool over_stars) {
                     put(frame, x, y, red, green, blue, gain);
                     break;
                 }
-                if (near_ink(lines[line].stamp, ix, iy)) {
+                if (near_ink(lines[line].stamp, ix, iy, 1)) {
                     int red = 0;
                     int green = 0;
                     int blue = 0;
                     hue_rgb(turns, 0.22f, 0.88f, red, green, blue);
                     put(frame, x, y, red, green, blue, gain);
+                    break;
+                }
+                if (near_ink(lines[line].stamp, ix, iy, 2)) {
+                    put(frame, x, y, 255, 255, 255, gain);
                     break;
                 }
             }
