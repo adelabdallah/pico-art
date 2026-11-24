@@ -2,7 +2,8 @@
 // The layout and the motion follow Flow Field at
 // https://www.ascii-magic.com/ascii/flow-field
 // The encoder sets how much of the panel those streams cover, from a few wisps to a busy field.
-// A beat from the microphone brightens the picture, shifts its hue, and hurries the streams, then all three ease back.
+// A beat from the microphone brightens the streams, shifts their hue, and hurries them, then all three ease back.
+// The dim field behind the streams keeps its own light.
 // Green starts and stops that microphone. Listening starts on.
 
 #include "pattern.hpp"
@@ -18,7 +19,7 @@ constexpr float SPEED = 10.0f;
 constexpr float TAU = 6.2831853f;
 constexpr float COVER_LOW = 0.15f;
 constexpr float DENSITY_STEP = 0.05f;
-// Extra brightness at the hit. The picture eases back to its own level.
+// Extra brightness of the streams at the hit. They ease back to their own level.
 constexpr float BEAT_LIFT = 0.48f;
 // About a twelfth of a turn at the hit.
 constexpr float BEAT_HUE = 0.08f;
@@ -57,7 +58,6 @@ static int particle_cap = 0;
 static int particle_count = 0;
 static float density = 0.0f;
 static float beat_level = 0.0f;
-static float beat_time = 0.0f;
 static uint32_t rng_state = 1;
 
 static float rnd() {
@@ -135,7 +135,7 @@ static void advance(Particle &particle, float dt, float seconds, float pace) {
     }
 }
 
-static void trail_colour(const uint8_t palette[][3], int hue, float level, int &red, int &green, int &blue) {
+static void trail_colour(const uint8_t palette[][3], int hue, float level, float lift, int &red, int &green, int &blue) {
     const uint8_t *colour = palette[hue & 7];
     red = (int)(10 + colour[0] * level);
     green = (int)(8 + colour[1] * level);
@@ -145,6 +145,11 @@ static void trail_colour(const uint8_t palette[][3], int hue, float level, int &
         red = (int)(red + (255 - red) * white);
         green = (int)(green + (255 - green) * white);
         blue = (int)(blue + (255 - blue) * white);
+    }
+    if (lift > 1.01f) {
+        red = clamp_channel(red * lift);
+        green = clamp_channel(green * lift);
+        blue = clamp_channel(blue * lift);
     }
 }
 
@@ -160,25 +165,11 @@ static void shift_palette(uint8_t palette[][3], float turns) {
     }
 }
 
-static void apply_lift(uint8_t *frame, float gain) {
-    if (gain < 1.01f) {
-        return;
-    }
-    for (int i = 0; i < PANEL_PIXELS * 3; ++i) {
-        int value = (int)(frame[i] * gain + 0.5f);
-        if (value > 255) {
-            value = 255;
-        }
-        frame[i] = (uint8_t)value;
-    }
-}
-
 }  // namespace
 
 void flow_start() {
     density = 0.0f;
     beat_level = 0.0f;
-    beat_time = 0.0f;
     environment_arm_listen();
     particle_cap = flow_particle_cap(PANEL_PIXELS);
     particles = (Particle *)pattern_alloc((int)sizeof(Particle) * particle_cap);
@@ -235,10 +226,6 @@ void flow_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
         beat_level = 1.0f;
     }
     float pace = 1.0f + BEAT_RUSH * beat_level;
-    if (dt > 0.0f && beat_level > 0.0f) {
-        beat_time += dt * BEAT_RUSH * beat_level;
-    }
-    float field_seconds = seconds + beat_time;
     const uint8_t (*palette)[3] = HUE;
     uint8_t shifted[8][3];
     float lift = 1.0f;
@@ -249,8 +236,8 @@ void flow_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     }
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
         for (int x = 0; x < PANEL_WIDTH; ++x) {
-            int hue = hue_index(field_angle((float)x, (float)y, field_seconds));
-            const uint8_t *colour = palette[hue];
+            int hue = hue_index(field_angle((float)x, (float)y, seconds));
+            const uint8_t *colour = HUE[hue];
             int red = 16 + colour[0] / 12;
             int green = 18 + colour[1] / 12;
             int blue = 36 + colour[2] / 12;
@@ -260,7 +247,7 @@ void flow_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     for (int i = 0; i < particle_count; ++i) {
         Particle &particle = particles[i];
         if (dt > 0.0f) {
-            advance(particle, dt, field_seconds, pace);
+            advance(particle, dt, seconds, pace);
             if (particle.age >= LIFE) {
                 birth(particle, i);
             }
@@ -282,9 +269,8 @@ void flow_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
             int red;
             int green;
             int blue;
-            trail_colour(palette, particle.ta[slot], level, red, green, blue);
+            trail_colour(palette, particle.ta[slot], level, lift, red, green, blue);
             paint(frame, particle.tx[slot], particle.ty[slot], red, green, blue);
         }
     }
-    apply_lift(frame, lift);
 }

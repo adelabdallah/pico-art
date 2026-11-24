@@ -119,7 +119,7 @@ Plasma is 1. Settings, INTRO, and the reset prompts have no number. The yellow b
 | 3 | feedback | Each frame samples the previous frame closer to the centre, turns it, and adds a soft spot. The picture smears into a tunnel. |
 | 4 | metaballs | Moving balls added into one field. They merge where they meet. |
 | 5 | life | Conway's Life on the whole panel. Colour is how long a cell has lived. A fresh board starts when the population stalls, or every 45 seconds. |
-| 6 | flow field | Particles trace a slowly turning noise field. Colour follows the direction they travel. A beat brightens the picture, shifts its hue, and hurries the streams. |
+| 6 | flow field | Particles trace a slowly turning noise field. Colour follows the direction they travel. A beat brightens the streams, shifts their hue, and hurries them. The dim field stays steady. |
 | 7 | voronoi cells | Fourteen drifting seeds and the regions they claim, shaded like stained glass. |
 | 8 | loop | Langton's loop. A generation that changes nothing plants the loop at a new spot. |
 | 9 | liquid | A square cup seen from above. Tilt pours a pool against the low walls and slides a web of light toward the low side. Sound spreads the pool, tints it, places a glint, and bends that web into a ring. |
@@ -147,7 +147,7 @@ The encoder sets how much of the panel the streams cover. Clockwise fills more o
 
 Green starts and stops the microphone. Listening starts on. Yellow adds a round mirror. Orange still adds a diagonal mirror. Red and blue keep their shared actions.
 
-A beat brightens the picture a little, shifts its hue, and hurries the streams, then all three ease back. The beat is the same onset liquid uses. Microphone sensitivity is on the settings page. 50 percent is the response tuned for liquid, and flow field uses that same ear.
+A beat brightens the streams a little, shifts their hue, and hurries them, then all three ease back. The dim field behind them stays steady. The beat is the same onset liquid uses. Microphone sensitivity is on the settings page. 50 percent is the response tuned for liquid, and flow field uses that same ear.
 
 ### Liquid
 
