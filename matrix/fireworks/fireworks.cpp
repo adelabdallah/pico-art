@@ -17,11 +17,14 @@ constexpr float FADE = 2.2f;
 constexpr float TAU = 6.2831853f;
 constexpr int HUE_COUNT = 7;
 
+constexpr int STAR_CAP = 280;
+
 static int skyline[PANEL_WIDTH_MAX];
 static float window_roll[PANEL_WIDTH_MAX];
-static int star_x[40];
-static int star_y[40];
-static float star_phase[40];
+static int star_x[STAR_CAP];
+static int star_y[STAR_CAP];
+static float star_phase[STAR_CAP];
+static int star_count = 0;
 static uint32_t rng_state = 1;
 static int launch_id = 1000;
 
@@ -95,15 +98,29 @@ void fireworks_start() {
     int x = 0;
     while (x < PANEL_WIDTH) {
         int width = 3 + (int)(rnd() * 6.0f);
-        int height = panel_iy(4) + (int)(rnd() * panel_sy(8.0f));
+        int height = 4 + (int)(rnd() * 8.0f);
         for (int i = 0; i < width && x < PANEL_WIDTH; ++i, ++x) {
             skyline[x] = height;
             window_roll[x] = rnd();
         }
     }
-    for (int i = 0; i < 40; ++i) {
+    int rows = scene_dy() + 36;
+    if (rows > PANEL_HEIGHT - 14) {
+        rows = PANEL_HEIGHT - 14;
+    }
+    if (rows < 1) {
+        rows = 1;
+    }
+    star_count = 40 * PANEL_WIDTH * rows / (PANEL_DESIGN * 36);
+    if (star_count < 8) {
+        star_count = 8;
+    }
+    if (star_count > STAR_CAP) {
+        star_count = STAR_CAP;
+    }
+    for (int i = 0; i < star_count; ++i) {
         star_x[i] = (int)(rnd() * PANEL_WIDTH);
-        star_y[i] = (int)(rnd() * panel_sy(36.0f));
+        star_y[i] = (int)(rnd() * (float)rows);
         star_phase[i] = rnd() * TAU;
     }
     for (int i = 0; i < 4; ++i) {
@@ -126,7 +143,8 @@ void fireworks_launch(bool large) {
     shell.on = true;
     shell.age = 0.0f;
     shell.bx = 8.0f + rnd() * (PANEL_WIDTH - 16);
-    shell.by = large ? 3.0f + rnd() * 6.0f : 16.0f + rnd() * 10.0f;
+    float sky_top = (float)scene_dy();
+    shell.by = sky_top + (large ? 3.0f + rnd() * 6.0f : 16.0f + rnd() * 10.0f);
     shell.sx = shell.bx + (rnd() - 0.5f) * (large ? 16.0f : 6.0f);
     shell.hue = (int)(rnd() * HUE_COUNT);
     shell.hue2 = (int)(rnd() * HUE_COUNT);
@@ -159,7 +177,7 @@ void fireworks_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
         Shell &shell = shells[shell_count];
         shell.age = age;
         shell.bx = 8.0f + hash_unit(id, 1) * (PANEL_WIDTH - 16);
-        shell.by = 6.0f + hash_unit(id, 2) * 18.0f;
+        shell.by = (float)scene_dy() + 6.0f + hash_unit(id, 2) * 18.0f;
         shell.sx = shell.bx + (hash_unit(id, 4) - 0.5f) * 10.0f;
         shell.hue = (int)(hash_unit(id, 3) * HUE_COUNT);
         shell.hue2 = (int)(hash_unit(id, 7) * HUE_COUNT);
@@ -203,14 +221,15 @@ void fireworks_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
                     glow += (1.0f - burst / 1.3f) * fall * fall;
                 }
             }
-            float v = clampf(0.15f + (float)y / PANEL_HEIGHT * 0.45f + glow * 0.7f, 0.0f, 1.0f);
+            float design_y = (float)y - (float)scene_dy();
+            float v = clampf(0.15f + design_y / (float)PANEL_DESIGN * 0.45f + glow * 0.7f, 0.0f, 1.0f);
             int red = (int)(4 + v * 40 + glow * 80);
             int green = (int)(8 + v * 36 + glow * 50);
             int blue = (int)(24 + v * 90 + glow * 40);
             put(frame, x, y, red, green, blue);
         }
     }
-    for (int i = 0; i < 40; ++i) {
+    for (int i = 0; i < star_count; ++i) {
         if (sinf(seconds * 2.0f + star_phase[i]) > 0.0f) {
             put(frame, star_x[i], star_y[i], 180, 190, 230);
         }

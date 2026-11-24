@@ -13,9 +13,10 @@
 
 namespace {
 
-#define HORIZON (panel_iy(40))
-#define FIRE_X (panel_ix(40))
-#define FIRE_Y (panel_iy(52))
+// The camp sits on the 64 by 64 picture. scene_y keeps it on the bottom, so extra rows are sky.
+#define HORIZON (scene_y(40))
+#define FIRE_X (scene_x(40))
+#define FIRE_Y (scene_y(52))
 constexpr float TAU = 6.2831853f;
 
 struct Spark {
@@ -52,13 +53,16 @@ struct Meteor {
     bool on;
 };
 
+constexpr int STAR_CAP = 400;
+
 static int tree_top[PANEL_WIDTH_MAX];
 static Spark sparks[24];
 static Burst bursts[40];
-static int star_x[70];
-static int star_y[70];
-static float star_bright[70];
-static float star_phase[70];
+static int star_x[STAR_CAP];
+static int star_y[STAR_CAP];
+static float star_bright[STAR_CAP];
+static float star_phase[STAR_CAP];
+static int star_count = 0;
 static uint32_t rng_state = 1;
 static bool shower_held = false;
 static bool flare_held = false;
@@ -130,17 +134,22 @@ static void fire_at(float v, int &red, int &green, int &blue) {
     blue = (int)(26 + t * 160);
 }
 
+static float ridge_at(float x) {
+    float design_x = x - (float)scene_dx();
+    return design_x * BAND_SLOPE + BAND_LIFT + (float)scene_dy();
+}
+
 static void paint_tent(uint8_t *frame, float flick) {
-    int apex_y = panel_iy(32);
-    int base_y = panel_iy(48);
-    int cx = panel_ix(16);
+    int apex_y = scene_y(32);
+    int base_y = scene_y(48);
+    int cx = scene_x(16);
     for (int y = apex_y; y <= base_y; ++y) {
         float down = (float)(y - apex_y) / (float)(base_y - apex_y);
-        int half = (int)(down * panel_sx(12.0f) + 0.5f);
+        int half = (int)(down * 12.0f + 0.5f);
         for (int x = cx - half; x <= cx + half; ++x) {
             float side = half == 0 ? 0.0f : (float)(x - cx) / (float)half;
             float lit = clampf(0.25f + side * 0.55f * flick + down * 0.15f, 0.0f, 1.0f);
-            bool door = fabsf((float)(x - cx)) < down * panel_sx(4.0f) && y > base_y - panel_iy(8);
+            bool door = fabsf((float)(x - cx)) < down * 4.0f && y > base_y - 8;
             if (door) {
                 put(frame, x, y, 18, 12, 16);
             } else {
@@ -152,14 +161,14 @@ static void paint_tent(uint8_t *frame, float flick) {
 }
 
 static void paint_fire(uint8_t *frame, float seconds, float flick, float flare) {
-    int reach = panel_iy(16) + (int)(flare * panel_sy(8.0f));
+    int reach = 16 + (int)(flare * 8.0f);
     float wide = 1.0f + flare * 0.5f;
     float hot = flick * (1.0f + flare * 0.9f);
     for (int y = FIRE_Y - reach; y <= FIRE_Y; ++y) {
         float height = (float)(FIRE_Y - y) / (float)reach;
-        float width = ((1.0f - height) * panel_sx(7.0f) * (0.65f + 0.35f * height) + panel_sx(0.6f)) * wide;
-        float lean = sinf(seconds * 3.0f + y * 0.45f) * height * panel_sx(1.4f);
-        for (int x = FIRE_X - panel_ix(10); x <= FIRE_X + panel_ix(10); ++x) {
+        float width = ((1.0f - height) * 7.0f * (0.65f + 0.35f * height) + 0.6f) * wide;
+        float lean = sinf(seconds * 3.0f + y * 0.45f) * height * 1.4f;
+        for (int x = FIRE_X - 10; x <= FIRE_X + 10; ++x) {
             float n = field_noise(x * 0.55f, y * 0.5f + seconds * 6.0f, 3);
             n = n * 0.65f + field_noise(x * 1.1f, y * 0.9f + seconds * 9.0f, 8) * 0.35f;
             float edge = 1.0f - fabsf((float)(x - FIRE_X) - lean) / width;
@@ -173,15 +182,15 @@ static void paint_fire(uint8_t *frame, float seconds, float flick, float flare) 
             }
         }
     }
-    put(frame, FIRE_X - panel_ix(5), FIRE_Y + panel_iy(1), 70, 36, 16);
-    put(frame, FIRE_X - panel_ix(4), FIRE_Y + panel_iy(1), 110, 58, 24);
-    put(frame, FIRE_X - panel_ix(3), FIRE_Y + panel_iy(2), 80, 42, 18);
-    put(frame, FIRE_X + panel_ix(3), FIRE_Y + panel_iy(1), 120, 64, 28);
-    put(frame, FIRE_X + panel_ix(4), FIRE_Y + panel_iy(2), 64, 32, 14);
-    put(frame, FIRE_X + panel_ix(5), FIRE_Y + panel_iy(1), 90, 48, 20);
+    put(frame, FIRE_X - 5, FIRE_Y + 1, 70, 36, 16);
+    put(frame, FIRE_X - 4, FIRE_Y + 1, 110, 58, 24);
+    put(frame, FIRE_X - 3, FIRE_Y + 2, 80, 42, 18);
+    put(frame, FIRE_X + 3, FIRE_Y + 1, 120, 64, 28);
+    put(frame, FIRE_X + 4, FIRE_Y + 2, 64, 32, 14);
+    put(frame, FIRE_X + 5, FIRE_Y + 1, 90, 48, 20);
     for (int step = -7; step <= 7; step += 3) {
-        put(frame, FIRE_X + panel_ix(step), FIRE_Y + panel_iy(3), 50, 32, 22);
-        put(frame, FIRE_X + panel_ix(step + 1), FIRE_Y + panel_iy(3), 36, 24, 18);
+        put(frame, FIRE_X + step, FIRE_Y + 3, 50, 32, 22);
+        put(frame, FIRE_X + step + 1, FIRE_Y + 3, 36, 24, 18);
     }
 }
 
@@ -195,8 +204,8 @@ static void paint_sparks(uint8_t *frame, float seconds) {
         if (sinf(seconds * 18.0f + spark.phase * 7.0f) < -0.25f) {
             continue;
         }
-        int x = (int)(FIRE_X + sinf(spark.phase + seconds * 1.4f) * panel_sx(1.0f + life * 5.0f) + (spark.sway - 0.5f) * life * panel_sx(12.0f));
-        int y = (int)(FIRE_Y - panel_sy(8.0f) - life * panel_sy(28.0f));
+        int x = (int)(FIRE_X + sinf(spark.phase + seconds * 1.4f) * (1.0f + life * 5.0f) + (spark.sway - 0.5f) * life * 12.0f);
+        int y = (int)(FIRE_Y - 8.0f - life * 28.0f);
         int red;
         int green;
         int blue;
@@ -311,7 +320,7 @@ static bool spawn_meteor() {
         return false;
     }
     float slope = BAND_SLOPE + (rnd() - 0.5f) * 0.36f;
-    float speed = panel_sx(32.0f + rnd() * 26.0f);
+    float speed = 32.0f + rnd() * 26.0f;
     float span = sqrtf(1.0f + slope * slope);
     Meteor &meteor = meteors[slot];
     meteor.on = true;
@@ -320,8 +329,8 @@ static bool spawn_meteor() {
     meteor.wobble = rnd() * TAU;
     meteor.wobble_rate = 1.6f + rnd() * 3.4f;
     meteor.wobble_amp = 5.0f + rnd() * 11.0f;
-    float head_x = panel_sx(-8.0f) + rnd() * panel_sx(30.0f);
-    float head_y = BAND_SLOPE * head_x + panel_sy(BAND_LIFT) + (rnd() - 0.5f) * panel_sy(14.0f);
+    float head_x = -8.0f + rnd() * ((float)PANEL_WIDTH * 0.55f);
+    float head_y = ridge_at(head_x) + (rnd() - 0.5f) * 14.0f;
     float ux = meteor.vx / speed;
     float uy = meteor.vy / speed;
     for (int i = 0; i < METEOR_TAIL; ++i) {
@@ -423,12 +432,24 @@ void campfire_start() {
     rng_state = 17;
     for (int x = 0; x < PANEL_WIDTH; ++x) {
         float pine = fabsf(fmodf(x * 0.37f, 1.0f) - 0.5f) * 2.0f;
-        float tall = (1.0f - pine) * panel_sy(3.0f + field_fbm(x * 0.12f, 0.0f, 2, 5) * 7.0f);
+        float tall = (1.0f - pine) * (3.0f + field_fbm(x * 0.12f, 0.0f, 2, 5) * 7.0f);
         tree_top[x] = HORIZON - 1 - (int)(tall + 0.5f);
     }
-    for (int i = 0; i < 70; ++i) {
+    int sky_px = PANEL_WIDTH * HORIZON;
+    star_count = (int)(70.0f * (float)sky_px / (64.0f * 40.0f) + 0.5f);
+    if (star_count < 8) {
+        star_count = 8;
+    }
+    if (star_count > STAR_CAP) {
+        star_count = STAR_CAP;
+    }
+    int star_rows = HORIZON - 6;
+    if (star_rows < 1) {
+        star_rows = 1;
+    }
+    for (int i = 0; i < star_count; ++i) {
         star_x[i] = (int)(rnd() * PANEL_WIDTH);
-        star_y[i] = (int)(rnd() * (HORIZON - 6));
+        star_y[i] = (int)(rnd() * star_rows);
         star_bright[i] = rnd();
         star_phase[i] = rnd() * TAU;
     }
@@ -505,8 +526,8 @@ void campfire_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     float glow = flick * (1.0f + flare * 0.8f);
     for (int y = 0; y < HORIZON; ++y) {
         for (int x = 0; x < PANEL_WIDTH; ++x) {
-            float ridge = panel_sy((x * 64.0f / (float)PANEL_WIDTH) * 0.42f - 4.0f);
-            float band = (y - ridge) / panel_sy(5.5f);
+            float ridge = ridge_at((float)x);
+            float band = (y - ridge) / 5.5f;
             float dust = expf(-band * band) * (0.35f + field_fbm(x * 0.08f + seconds * 0.02f, y * 0.18f, 3, 3));
             int red;
             int green;
@@ -520,7 +541,7 @@ void campfire_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
             put(frame, x, y, red, green, blue);
         }
     }
-    for (int i = 0; i < 70; ++i) {
+    for (int i = 0; i < star_count; ++i) {
         float twinkle = 0.5f + 0.5f * sinf(seconds * 2.2f + star_phase[i]);
         float v = star_bright[i] * 0.55f + twinkle * 0.45f;
         if (v > 0.4f) {
@@ -540,7 +561,7 @@ void campfire_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
             float dy = (float)(y - FIRE_Y) * 1.15f;
             float dist = sqrtf(dx * dx + dy * dy);
             float n = field_fbm(x * 0.18f, y * 0.4f, 2, 4);
-            float v = clampf(expf(-dist / panel_s(14.0f)) * glow * 1.2f + (n - 0.5f) * 0.2f, 0.0f, 1.0f);
+            float v = clampf(expf(-dist / 14.0f) * glow * 1.2f + (n - 0.5f) * 0.2f, 0.0f, 1.0f);
             int red;
             int green;
             int blue;

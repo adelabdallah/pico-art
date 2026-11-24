@@ -1,6 +1,7 @@
 // Particles trace a slowly turning noise field. Their colour follows the direction they travel.
 // The layout and the motion follow Flow Field at
 // https://www.ascii-magic.com/ascii/flow-field
+// The encoder sets how much of the panel those streams cover, from a few wisps to a busy field.
 
 #include "pattern.hpp"
 #include "noise.hpp"
@@ -9,11 +10,12 @@
 
 namespace {
 
-constexpr int COUNT = 220;
 constexpr int TRAIL = 16;
 constexpr float LIFE = 4.5f;
 constexpr float SPEED = 10.0f;
 constexpr float TAU = 6.2831853f;
+constexpr float COVER_LOW = 0.15f;
+constexpr float DENSITY_STEP = 0.05f;
 
 static const uint8_t HUE[8][3] = {
     {255, 74, 138},
@@ -38,7 +40,12 @@ struct Particle {
     uint32_t cycle;
 };
 
+static_assert(sizeof(Particle) <= FLOW_PARTICLE_BYTES, "flow particle");
+
 static Particle *particles = nullptr;
+static int particle_cap = 0;
+static int particle_count = 0;
+static float density = 0.0f;
 static uint32_t rng_state = 1;
 
 static float rnd() {
@@ -46,8 +53,25 @@ static float rnd() {
     return (float)(rng_state >> 8) * (1.0f / 16777216.0f);
 }
 
+static int count_for_density() {
+    float cover = COVER_LOW + (FLOW_COVER_HIGH - COVER_LOW) * density;
+    int count = (int)((float)PANEL_PIXELS * cover / FLOW_FOOTPRINT + 0.5f);
+    if (count < 8) {
+        count = 8;
+    }
+    if (count > particle_cap) {
+        count = particle_cap;
+    }
+    return count;
+}
+
+static float field_scale() {
+    return 0.03f + density * 0.07f;
+}
+
 static float field_angle(float x, float y, float seconds) {
-    float n = field_noise(x * 0.05f + 3.0f, y * 0.05f + seconds * 0.03f, 7);
+    float scale = field_scale();
+    float n = field_noise(x * scale + 3.0f, y * scale + seconds * 0.03f, 7);
     return n * TAU * 2.0f + seconds * 0.12f;
 }
 
@@ -114,16 +138,39 @@ static void trail_colour(int hue, float level, int &red, int &green, int &blue) 
 }  // namespace
 
 void flow_start() {
-    particles = (Particle *)pattern_alloc((int)sizeof(Particle) * COUNT);
+    density = 0.0f;
+    particle_cap = flow_particle_cap(PANEL_PIXELS);
+    particles = (Particle *)pattern_alloc((int)sizeof(Particle) * particle_cap);
+    particle_count = count_for_density();
     rng_state = 9;
-    for (int i = 0; i < COUNT; ++i) {
+    for (int i = 0; i < particle_count; ++i) {
         particles[i].cycle = 0;
         birth(particles[i], i);
-        float target = ((float)i + 0.5f) / (float)COUNT * LIFE;
+        float target = ((float)i + 0.5f) / (float)particle_count * LIFE;
         while (particles[i].age < target) {
             advance(particles[i], 0.05f, 0.0f);
         }
     }
+}
+
+void flow_density(int steps) {
+    if (particles == nullptr || particle_cap < 1) {
+        return;
+    }
+    density += (float)steps * DENSITY_STEP;
+    if (density < 0.0f) {
+        density = 0.0f;
+    }
+    if (density > 1.0f) {
+        density = 1.0f;
+    }
+    int want = count_for_density();
+    while (particle_count < want) {
+        particles[particle_count].cycle = 0;
+        birth(particles[particle_count], particle_count);
+        particle_count += 1;
+    }
+    particle_count = want;
 }
 
 void flow_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
@@ -142,7 +189,7 @@ void flow_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
             write_bgr(frame + (y * PANEL_WIDTH + x) * 3, red, green, blue);
         }
     }
-    for (int i = 0; i < COUNT; ++i) {
+    for (int i = 0; i < particle_count; ++i) {
         Particle &particle = particles[i];
         if (dt > 0.0f) {
             advance(particle, dt, seconds);

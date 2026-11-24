@@ -12,6 +12,7 @@
 // A step shows the next name at once, even in the middle of that flash.
 // INTRO sits between settings and RESET?. A click there plays the intro, then the pattern that was showing returns.
 // The list ends on RESET?. A click there asks ARE YOU SURE?. Another click clears every pattern's mirrors, slide, turn, and the hue.
+// Hue also clears when the pattern changes, and a reboot starts with no hue shift.
 // Outside that mode, the encoder flings the picture sideways, or edits the open setting.
 // Settings is the last pattern. There, blue picks a value and the encoder raises or lowers it.
 // The pattern and the settings, including the double-click window, are stored in the last flash sector and restored on boot.
@@ -42,7 +43,7 @@
 // A new circle covers 1 to 10 percent of the panel. Its inside shows the pixels outside the rim, folded in.
 // At double speed the picture pulses, then falls off the bottom and fades back in at full speed.
 // Green GP26 turns 5 degrees clockwise. A hold spins it.
-// Blue GP22 shifts the hue by a fifth of a turn, and a hold spins it, except on settings.
+// Blue GP22 shifts the hue by a fifth of a turn, and a hold spins it, except on settings. The shift lasts until the pattern changes.
 // On liquid, yellow starts and stops the microphone. Listening starts on. Orange still adds a diagonal there.
 // On settings, blue moves to the next value. Elsewhere blue shifts the hue. Orange and yellow stay quiet there.
 // On solar, the encoder walks from the wide view through each world and back. Green flings that world's spin, or the whole orrery on the wide view, and on Earth and Pluto it also speeds the Moon and Charon. A hold keeps the spin going.
@@ -50,6 +51,7 @@
 // Yellow tours the orrery and each world, holding each for 5 seconds. The view tumbles slowly, and the nod is the large swing so the poles pass through the disc. Each world stays centred. The Moon and Charon speed up. Another press stops the tour. A play mark bobs on the OLED while it runs.
 // On skyline, orange moves the view up and yellow moves it down. The encoder moves the view left and right, and the view stops at the edge of the harbour.
 // On lighthouse, ferris wheel, and galaxy, the encoder changes how fast the beam, the wheel, and the disk move. Clockwise is faster. The sea, the rim lights, and the stars keep their own pace.
+// On flow field, the encoder sets how much of the panel the streams cover. Clockwise is denser, from about 15 percent of the panel up to about 75 percent.
 // On lighthouse, yellow strikes lightning and orange thickens the rain. The rain rises for a second, holds for a second, and falls for a second. Holding orange keeps the rain thick.
 // On campfire, orange throws sparks and yellow flares the flame. Holding either keeps that going.
 // Green sends one comet across the milky way. A hold keeps a meteor shower along that band, and letting go thins new meteors out over 3 seconds. The picture stays upright.
@@ -196,7 +198,7 @@ constexpr int PATTERN_COUNT = (int)(sizeof patterns / sizeof patterns[0]);
 constexpr uint32_t PATTERN_MAGIC = 0x6d617458;
 constexpr uint32_t PATTERN_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 
-// version 0 is a record from before the settings page. Those boots keep pattern, brightness, and hue.
+// version 0 is a record from before the settings page. Those boots keep pattern and brightness. Hue starts clear.
 // Version 5 predates the double-click window. Those boots keep the default window.
 // Version 6 predates the panel count, and it still lists reaction at index 4.
 constexpr uint32_t PATTERN_VERSION = 7;
@@ -418,10 +420,8 @@ static Settings load_settings() {
             loaded.brightness = percent;
         }
     }
-    // Thousandths of a turn. A record from before hue was saved reads as zero.
-    if (saved->hue < 1000) {
-        loaded.hue = saved->hue / 1000.0f;
-    }
+    // The hue slot stays in the record so later fields keep their places. Boot leaves the shift clear.
+    loaded.hue = 0.0f;
     // Version 0 predates the settings page. Later fields stay at their defaults.
     if (saved->version == 0) {
         return loaded;
@@ -471,14 +471,7 @@ static void program_settings(void *param) {
     saved->magic = PATTERN_MAGIC;
     saved->index = (uint32_t)incoming->pattern;
     saved->brightness = (uint32_t)incoming->brightness + 1;
-    int milli = (int)(incoming->hue * 1000.0f + 0.5f);
-    if (milli < 0) {
-        milli = 0;
-    }
-    if (milli >= 1000) {
-        milli = 0;
-    }
-    saved->hue = (uint32_t)milli;
+    saved->hue = 0;
     saved->version = PATTERN_VERSION;
     saved->mic_sens = (uint32_t)incoming->mic;
     saved->imu_sens = (uint32_t)incoming->imu;
@@ -506,6 +499,10 @@ static bool on_environment() {
 
 static bool on_settings() {
     return std::strcmp(patterns[settings.pattern].name, "settings") == 0;
+}
+
+static bool on_flow() {
+    return std::strcmp(patterns[settings.pattern].name, "flow field") == 0;
 }
 
 static bool on_solar() {
@@ -801,6 +798,12 @@ static void load_view(int index) {
     view_target = view.target;
 }
 
+static void clear_hue() {
+    hue_spin = false;
+    hue_tap = false;
+    settings.hue = 0.0f;
+}
+
 static void commit_pattern(int index) {
     flight_dir = 0;
     if (index < 0) {
@@ -812,6 +815,7 @@ static void commit_pattern(int index) {
     if (changed) {
         store_view(settings.pattern);
         load_view(index);
+        clear_hue();
     }
     settings.pattern = index;
     anim_ms = 0;
@@ -1482,9 +1486,7 @@ static void clear_view() {
     view_angle = 0.0f;
     view_target = 0.0f;
     view_spinning = false;
-    hue_spin = false;
-    hue_tap = false;
-    settings.hue = 0.0f;
+    clear_hue();
     save_settings(settings);
 }
 
@@ -1810,9 +1812,6 @@ static void poll_button(PanelButton &button, uint32_t now) {
     }
     if (released) {
         hue_spin = false;
-        if (!hue_tap) {
-            save_settings(settings);
-        }
     } else if (down && !hue_spin && (int32_t)(now - button.pressed_at) >= HOLD_MS) {
         begin_hue_spin();
     }
@@ -1834,6 +1833,7 @@ static void handoff_pattern(int index) {
     }
     store_view(settings.pattern);
     load_view(index);
+    clear_hue();
     settings.pattern = index;
     return_pattern = -1;
     show_status();
@@ -1996,6 +1996,13 @@ static void poll_encoder(uint32_t now) {
         int steps = consume_nav(detents);
         if (steps != 0) {
             galaxy_spin(steps);
+        }
+        return;
+    }
+    if (on_flow()) {
+        int steps = consume_nav(detents);
+        if (steps != 0) {
+            flow_density(steps);
         }
         return;
     }

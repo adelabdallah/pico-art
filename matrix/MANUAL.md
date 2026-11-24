@@ -104,7 +104,7 @@ These apply on every pattern except where a later section names a different acti
 | Orange | Adds a diagonal mirror to the current pattern. The sixth press clears that pattern's lines. A line runs near a corner-to-corner diagonal and misses the centre. The smaller side shows the other side reflected. Holding orange turns that new line about the centre until it is released. |
 | Yellow | Adds a round mirror. The eighth press clears that pattern's circles. A new circle covers 1 to 10 percent of the panel. Its inside shows the pixels outside the rim, folded in. Holding yellow grows that new circle up to 40 percent of the panel, then back to empty, and repeats until it is released. |
 | Green | Turns the picture 5 degrees clockwise. A hold spins it. |
-| Blue | Shifts the hue by a fifth of a turn. A hold spins the hue. Releasing the hold stores the hue. |
+| Blue | Shifts the hue by a fifth of a turn. A hold spins the hue. The shift lasts while that pattern is on screen. Changing pattern clears it, and a reboot starts with no shift. |
 
 Mirrors, the turn, and the sideways slide belong to the pattern that was showing when they were made. Changing pattern restores that pattern's own set.
 
@@ -135,9 +135,15 @@ Plasma is 1. Settings, INTRO, and the reset prompts have no number. The yellow b
 | 19 | galaxy | A tilted spiral, warm at the core and blue along two arms. The solar system sits on the outer tip of one arm. |
 |  | settings | Three gears. Blue picks a stored value and the encoder raises or lowers it. |
 
-Plasma, warp, feedback, metaballs, life, flow field, voronoi cells, loop, pipes, reef, and aurora use the shared controls only.
+Plasma, warp, feedback, metaballs, life, voronoi cells, loop, pipes, reef, and aurora use the shared controls only.
+
+Campfire, lighthouse, ferris wheel, aurora, and fireworks keep the 64 by 64 picture at the same size. A wider chain continues the scene on both sides. A taller chain adds sky above it.
 
 ## Controls by pattern
+
+### Flow field
+
+The encoder sets how much of the panel the streams cover. Clockwise fills more of the panel. The sparse end covers about 15 percent. The busy end covers about 75 percent. Red, orange, yellow, green, and blue keep their shared actions.
 
 ### Liquid
 
@@ -173,7 +179,7 @@ Orange moves the view up. Yellow moves it down. A press steps a short way, and a
 
 The encoder changes how fast the beam moves. Clockwise is faster. The sea and the spray keep their own pace.
 
-Yellow strikes lightning. Orange thickens the rain. The rain rises for a second, holds for a second, and falls for a second. Holding orange keeps the rain thick. Red, green, and blue keep their shared actions.
+Yellow strikes lightning. Orange thickens the rain until 240 drops are falling. The calm rain is 80 drops. The rain rises for a second, holds for a second, and falls for a second. Holding orange keeps the rain thick. Red, green, and blue keep their shared actions.
 
 ### Ferris wheel
 

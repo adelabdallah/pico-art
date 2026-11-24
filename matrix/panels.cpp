@@ -76,7 +76,11 @@ void panels_apply(int count) {
 
     int grid = 5 * PANEL_PIXELS;
     int plate = 192 * 108 * 3;
+    int flow_bytes = flow_particle_cap(PANEL_PIXELS) * FLOW_PARTICLE_BYTES;
     int need = grid > plate ? grid : plate;
+    if (flow_bytes > need) {
+        need = flow_bytes;
+    }
     if (need != arena_bytes) {
         std::free(arena);
         arena = need_bytes(need);

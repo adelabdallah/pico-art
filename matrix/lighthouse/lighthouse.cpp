@@ -3,6 +3,7 @@
 // https://www.ascii-magic.com/ascii/lighthouse-storm
 // The encoder speeds the beam. The sea and the spray keep their own pace.
 // Yellow strikes a new bolt. Orange thickens the rain, up for a second, held for a second, then down for a second. Holding orange keeps it thick.
+// Calm rain is 80 drops. Thick rain is 240. The tower keeps its 64 by 64 size, and extra rows are sky.
 
 #include "pattern.hpp"
 #include "noise.hpp"
@@ -11,9 +12,9 @@
 
 namespace {
 
-#define HORIZON (panel_iy(36))
-#define LAMP_X (panel_ix(44))
-#define LAMP_Y (panel_iy(16))
+#define HORIZON (scene_y(36))
+#define LAMP_X (scene_x(44))
+#define LAMP_Y (scene_y(16))
 constexpr float BASE_SPIN = 1.2f;
 constexpr float RATE_FLOOR = 0.35f;
 constexpr float RATE_CAP = 3.5f;
@@ -38,7 +39,7 @@ static float rock_top[PANEL_WIDTH_MAX];
 static int bolt_x[40];
 static int bolt_y[40];
 static int bolt_count = 0;
-static Drop drops[120];
+static Drop drops[240];
 static Spray spray[36];
 static uint32_t rng_state = 1;
 static int bolt_cycle = -1;
@@ -71,7 +72,7 @@ static void put(uint8_t *frame, int x, int y, int red, int green, int blue) {
 
 static void make_bolt() {
     bolt_count = 0;
-    float bx = 8.0f + rnd() * 28.0f;
+    float bx = 4.0f + rnd() * (float)(PANEL_WIDTH - 8);
     for (int y = 0; y < HORIZON && bolt_count < 40; ++y) {
         bolt_x[bolt_count] = (int)(bx + 0.5f);
         bolt_y[bolt_count] = y;
@@ -127,7 +128,7 @@ static void advance_rain(int dt_ms) {
 }
 
 static void paint_tower(uint8_t *frame, float lamp) {
-    for (int y = LAMP_Y + panel_iy(4); y < panel_iy(42); ++y) {
+    for (int y = LAMP_Y + 4; y < scene_y(42); ++y) {
         float half = 2.2f + (float)(y - LAMP_Y) * 0.12f;
         int band = ((y - LAMP_Y - 4) / 3) % 2;
         for (int x = (int)(LAMP_X - half); x <= (int)(LAMP_X + half); ++x) {
@@ -167,9 +168,9 @@ void lighthouse_start() {
     for (int x = 0; x < PANEL_WIDTH; ++x) {
         float dist = fabsf((float)(x - LAMP_X - 2));
         if (dist < 16.0f) {
-            rock_top[x] = 40.0f + dist * dist * 0.045f + (field_noise(x * 0.45f, 0.0f, 3) - 0.5f) * 3.0f;
+            rock_top[x] = scene_yf(40.0f) + dist * dist * 0.045f + (field_noise(x * 0.45f, 0.0f, 3) - 0.5f) * 3.0f;
         } else {
-            rock_top[x] = 80.0f;
+            rock_top[x] = scene_yf(80.0f);
         }
     }
     bolt_cycle = -1;
@@ -178,7 +179,7 @@ void lighthouse_start() {
     rain_phase = 0;
     rain_ms = 0;
     make_bolt();
-    for (int i = 0; i < 120; ++i) {
+    for (int i = 0; i < 240; ++i) {
         drops[i].x = rnd() * PANEL_WIDTH;
         drops[i].y = rnd() * PANEL_HEIGHT;
         drops[i].speed = 28.0f + rnd() * 16.0f;
@@ -321,15 +322,15 @@ void lighthouse_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
                 continue;
             }
             int x = (int)(origin + spray[i].vx * age * 6.0f * side);
-            int y = (int)(40.0f - spray[i].vy * age + 7.0f * age * age);
-            if (y > 48) {
+            int y = (int)(scene_yf(40.0f) - spray[i].vy * age + 7.0f * age * age);
+            if (y > scene_y(48)) {
                 continue;
             }
             int foam = (int)(200 - age * 80);
             put(frame, x, y, foam, foam + 8, 255);
         }
     }
-    int drop_count = 80 + (int)(40.0f * rain_boost() + 0.5f);
+    int drop_count = 80 + (int)(160.0f * rain_boost() + 0.5f);
     for (int i = 0; i < drop_count; ++i) {
         float y = fmodf(drops[i].y + seconds * drops[i].speed, (float)PANEL_HEIGHT + 2.0f) - 1.0f;
         float x = drops[i].x - y * 0.35f - seconds * 8.0f;

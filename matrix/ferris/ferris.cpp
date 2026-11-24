@@ -14,17 +14,19 @@ constexpr float TAU = 6.2831853f;
 constexpr float BASE_SPIN = 0.18f;
 constexpr float RATE_FLOOR = 0.25f;
 constexpr float RATE_CAP = 6.0f;
-static float wheel_x() { return panel_sx(32.0f); }
-static float wheel_y() { return panel_sy(28.0f); }
-static float wheel_r() { return panel_sy(22.0f); }
+static float wheel_x() { return scene_xf(32.0f); }
+static float wheel_y() { return scene_yf(28.0f); }
+static float wheel_r() { return 22.0f; }
 constexpr int GONDOLAS = 12;
+constexpr int STAR_CAP = 420;
 
 static float spin_rate = 1.0f;
 static float spin_angle = 0.0f;
 static int city_top[PANEL_WIDTH_MAX];
-static int star_x[24];
-static int star_y[24];
-static float star_phase[24];
+static int star_x[STAR_CAP];
+static int star_y[STAR_CAP];
+static float star_phase[STAR_CAP];
+static int star_count = 0;
 static uint32_t rng_state = 1;
 
 static const uint8_t GONDOLA[6][3] = {
@@ -107,11 +109,22 @@ void ferris_start() {
     rng_state = 5;
     for (int x = 0; x < PANEL_WIDTH; ++x) {
         int extra = sinf(x * 0.35f) > 0.55f ? 3 : 0;
-        city_top[x] = panel_iy(52) - (int)(rnd() * panel_sy(4.0f)) - (extra ? panel_iy(3) : 0);
+        city_top[x] = scene_y(52) - (int)(rnd() * 4.0f) - (extra ? 3 : 0);
     }
-    for (int i = 0; i < 24; ++i) {
+    int rows = scene_dy() + 14;
+    if (rows < 1) {
+        rows = 1;
+    }
+    star_count = 24 * PANEL_WIDTH * rows / (PANEL_DESIGN * 14);
+    if (star_count < 8) {
+        star_count = 8;
+    }
+    if (star_count > STAR_CAP) {
+        star_count = STAR_CAP;
+    }
+    for (int i = 0; i < star_count; ++i) {
         star_x[i] = (int)(rnd() * PANEL_WIDTH);
-        star_y[i] = (int)(rnd() * panel_sy(14.0f));
+        star_y[i] = (int)(rnd() * (float)rows);
         star_phase[i] = rnd() * TAU;
     }
 }
@@ -135,7 +148,8 @@ void ferris_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     }
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
         for (int x = 0; x < PANEL_WIDTH; ++x) {
-            float v = clampf((float)y / panel_sy(50.0f) + (field_fbm((float)x * 0.05f, (float)y * 0.12f, 2, 2) - 0.5f) * 0.15f, 0.0f, 1.0f);
+            float design_y = (float)y - (float)scene_dy();
+            float v = clampf(design_y / 50.0f + (field_fbm((float)x * 0.05f, (float)y * 0.12f, 2, 2) - 0.5f) * 0.15f, 0.0f, 1.0f);
             int red;
             int green;
             int blue;
@@ -143,14 +157,14 @@ void ferris_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
             put(frame, x, y, red, green, blue);
         }
     }
-    for (int i = 0; i < 24; ++i) {
+    for (int i = 0; i < star_count; ++i) {
         if (sinf(seconds * 2.0f + star_phase[i]) > 0.15f) {
             put(frame, star_x[i], star_y[i], 255, 246, 200);
         }
     }
     for (int x = 0; x < PANEL_WIDTH; ++x) {
         for (int y = city_top[x]; y < PANEL_HEIGHT; ++y) {
-            if (y >= panel_iy(58)) {
+            if (y >= scene_y(58)) {
                 put(frame, x, y, 28, 22, 36);
             } else {
                 put(frame, x, y, 16, 12, 24);
@@ -160,9 +174,9 @@ void ferris_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
             put(frame, x, city_top[x] + 1, 255, 210, 120);
         }
     }
-    line(frame, (int)wheel_x(), (int)wheel_y(), (int)(wheel_x() - panel_sx(16.0f)), panel_iy(58), 90, 96, 112);
-    line(frame, (int)wheel_x(), (int)wheel_y(), (int)(wheel_x() + panel_sx(16.0f)), panel_iy(58), 90, 96, 112);
-    line(frame, (int)(wheel_x() - panel_sx(10.0f)), panel_iy(46), (int)(wheel_x() + panel_sx(10.0f)), panel_iy(46), 124, 130, 150);
+    line(frame, (int)wheel_x(), (int)wheel_y(), (int)(wheel_x() - 16.0f), scene_y(58), 90, 96, 112);
+    line(frame, (int)wheel_x(), (int)wheel_y(), (int)(wheel_x() + 16.0f), scene_y(58), 90, 96, 112);
+    line(frame, (int)(wheel_x() - 10.0f), scene_y(46), (int)(wheel_x() + 10.0f), scene_y(46), 124, 130, 150);
     for (int k = 0; k < GONDOLAS; ++k) {
         float angle = spin_angle + (float)k * TAU / GONDOLAS;
         for (float s = 3.0f; s < wheel_r(); s += 1.0f) {

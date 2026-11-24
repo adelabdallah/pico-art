@@ -57,7 +57,7 @@ static void curtain(int which, float level, int &red, int &green, int &blue) {
 void aurora_start() {
     stars = pattern_alloc(PANEL_PIXELS);
     for (int x = 0; x < PANEL_WIDTH; ++x) {
-        hill[x] = panel_sy(58.0f) - field_fbm(x * 0.08f * 64.0f / (float)PANEL_WIDTH, 1.5f, 3, 21) * panel_sy(4.5f);
+        hill[x] = scene_yf(58.0f) - field_fbm(x * 0.08f, 1.5f, 3, 21) * 4.5f;
     }
     for (int i = 0; i < PANEL_PIXELS; ++i) {
         int x = i % PANEL_WIDTH;
@@ -76,10 +76,9 @@ void aurora_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     for (int r = 0; r < 3; ++r) {
         const Ribbon &ribbon = RIBBONS[r];
         for (int x = 0; x < PANEL_WIDTH; ++x) {
-            float across = 64.0f / (float)PANEL_WIDTH;
-            float p = x * ribbon.freq * across + seconds * ribbon.speed;
-            float q = x * ribbon.freq2 * across + seconds * ribbon.speed2;
-            base[r][x] = panel_sy(ribbon.y) + panel_sy(ribbon.amp) * sinf(p) + panel_sy(ribbon.amp2) * sinf(q);
+            float p = x * ribbon.freq + seconds * ribbon.speed;
+            float q = x * ribbon.freq2 + seconds * ribbon.speed2;
+            base[r][x] = scene_yf(ribbon.y) + ribbon.amp * sinf(p) + ribbon.amp2 * sinf(q);
             float slope = ribbon.amp * ribbon.freq * cosf(p) + ribbon.amp2 * ribbon.freq2 * cosf(q);
             fold[r][x] = 0.45f + fminf(1.1f, fabsf(slope) * 8.0f);
             float fb = field_fbm(x * 0.42f - seconds * ribbon.drift, (float)ribbon.seed, 3, ribbon.seed);
@@ -100,7 +99,7 @@ void aurora_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
             float sum = 0.0f;
             for (int r = 0; r < 3; ++r) {
                 float h = base[r][x] - (float)y;
-                float length = panel_sy(RIBBONS[r].length);
+                float length = RIBBONS[r].length;
                 float v = h >= 0.0f ? expf(-h / length) * (h < 1.6f ? 1.7f - h * 0.35f : 1.1f) : expf(h * 1.3f);
                 float intensity = v * fold[r][x] * (h < 1.2f ? 0.7f + ray[r][x] * 0.3f : ray[r][x]);
                 sum += intensity;
@@ -128,7 +127,10 @@ void aurora_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
                 int lit = stars[index] == 2 ? 230 : 150;
                 put(frame, x, y, lit, lit, 255);
             } else {
-                float sky = (float)y / PANEL_HEIGHT;
+                float sky = ((float)y - (float)scene_dy()) / (float)PANEL_DESIGN;
+                if (sky < 0.0f) {
+                    sky = 0.0f;
+                }
                 int blue = (int)(14 + sky * 40 + level * 30);
                 put(frame, x, y, (int)(4 + sky * 16), (int)(8 + sky * 24), blue);
             }

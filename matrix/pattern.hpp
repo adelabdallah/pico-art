@@ -59,6 +59,44 @@ inline int panel_iy(int value) {
     return value * PANEL_HEIGHT / PANEL_DESIGN;
 }
 
+// A scene keeps its 64 by 64 sizes. Extra width is split on both sides. Extra height is sky above the picture.
+inline int scene_dx() {
+    return (PANEL_WIDTH - PANEL_DESIGN) / 2;
+}
+
+inline int scene_dy() {
+    return PANEL_HEIGHT - PANEL_DESIGN;
+}
+
+inline int scene_x(int value) {
+    return value + scene_dx();
+}
+
+inline int scene_y(int value) {
+    return value + scene_dy();
+}
+
+inline float scene_xf(float value) {
+    return value + (float)scene_dx();
+}
+
+inline float scene_yf(float value) {
+    return value + (float)scene_dy();
+}
+
+// The busy flow field aims at about 75 percent of the panel, with about 6 lit pixels per particle.
+constexpr float FLOW_COVER_HIGH = 0.75f;
+constexpr float FLOW_FOOTPRINT = 6.0f;
+constexpr int FLOW_PARTICLE_BYTES = 104;
+
+inline int flow_particle_cap(int pixels) {
+    int count = (int)((float)pixels * FLOW_COVER_HIGH / FLOW_FOOTPRINT + 0.5f);
+    if (count < 8) {
+        count = 8;
+    }
+    return count;
+}
+
 // Builds the canvas for 1, 2, or 4 panels. Any other count is one panel.
 void panels_apply(int count);
 uint8_t *panel_frame();
@@ -197,6 +235,8 @@ void life_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 
 void flow_start();
 void flow_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+// One encoder step raises or lowers how much of the panel the streams cover.
+void flow_density(int steps);
 
 void voronoi_start();
 void voronoi_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
