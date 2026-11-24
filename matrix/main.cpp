@@ -29,7 +29,7 @@
 // The yellow band names the pattern, or the setting while settings is open.
 // Each pattern keeps its number on the right of that band. Plasma is 1. Settings, INTRO, and the reset prompts have none.
 // The blue band draws slow waves that follow the mirrors, the turn, and a slide.
-// On liquid it shows the mic and an equalizer.
+// On liquid and flow field it shows the mic and an equalizer.
 // The OLED turns off after its timer. The default is 2 minutes. A button turns it back on.
 // The dimmest contrast setting is 5 percent.
 // Button C goes to the GPIO and NO goes to ground.
@@ -44,7 +44,7 @@
 // At double speed the picture pulses, then falls off the bottom and fades back in at full speed.
 // Green GP26 turns 5 degrees clockwise. A hold spins it.
 // Blue GP22 shifts the hue by a fifth of a turn, and a hold spins it, except on settings. The shift lasts until the pattern changes.
-// On liquid, yellow starts and stops the microphone. Listening starts on. Orange still adds a diagonal there.
+// On liquid and flow field, green starts and stops the microphone. Listening starts on. Yellow still adds a circle there.
 // On settings, blue moves to the next value. Elsewhere blue shifts the hue. Orange and yellow stay quiet there.
 // On solar, the encoder walks from the wide view through each world and back. Green flings that world's spin, or the whole orrery on the wide view, and on Earth and Pluto it also speeds the Moon and Charon. A hold keeps the spin going.
 // Orange on a world returns to the orrery. Orange on the orrery pulls back over about two seconds to the galaxy, and the pattern changes when the picture arrives. A second press during the flight turns it around.
@@ -52,6 +52,7 @@
 // On skyline, orange moves the view up and yellow moves it down. The encoder moves the view left and right, and the view stops at the edge of the harbour.
 // On lighthouse, ferris wheel, and galaxy, the encoder changes how fast the beam, the wheel, and the disk move. Clockwise is faster. The sea, the rim lights, and the stars keep their own pace.
 // On flow field, the encoder sets how much of the panel the streams cover. Clockwise is denser, from about 15 percent of the panel up to about 75 percent.
+// A beat brightens that picture, shifts its hue, and hurries the streams, then all three ease back.
 // On lighthouse, yellow strikes lightning and orange thickens the rain. The rain rises for a second, holds for a second, and falls for a second. Holding orange keeps the rain thick.
 // On campfire, orange throws sparks and yellow flares the flame. Holding either keeps that going.
 // Green sends one comet across the milky way. A hold keeps a meteor shower along that band, and letting go thins new meteors out over 3 seconds. The picture stays upright.
@@ -506,6 +507,10 @@ static bool on_flow() {
     return std::strcmp(patterns[settings.pattern].name, "flow field") == 0;
 }
 
+static bool on_mic() {
+    return on_environment() || on_flow();
+}
+
 static bool on_solar() {
     return std::strcmp(patterns[settings.pattern].name, "solar") == 0;
 }
@@ -749,7 +754,7 @@ static void present_oled(uint32_t now) {
             number = shown + 1;
         }
     }
-    if (on_environment() && !reset_confirm && (!browsing || preview == settings.pattern)) {
+    if (on_mic() && !reset_confirm && (!browsing || preview == settings.pattern)) {
         char listen[8];
         float bands[8];
         snprintf(listen, sizeof listen, environment_listening() ? "MIC ON" : "MIC OFF");
@@ -1665,7 +1670,7 @@ static void poll_button(PanelButton &button, uint32_t now) {
         }
         return;
     }
-    if (on_environment() && button.role == ButtonRole::Circle) {
+    if (on_mic() && button.role == ButtonRole::Spin) {
         if (pressed) {
             environment_toggle_listen();
             show_status();

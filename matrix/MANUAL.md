@@ -16,7 +16,7 @@ This file follows the firmware in this directory. When a pin, a pattern, or a bu
 | FainWan MT3608 step-up modules | 12 V for the button LEDs. A pack of five. Each takes 2 V to 24 V in and can raise it as high as 28 V, at up to 2 A. Set the output to 12 V from the panel 5 V supply. | https://www.amazon.ca/dp/B09LM83XBF |
 | 128×64 SSD1306 OLED | Names the pattern and the open setting. The top 16 rows are the yellow band. The lower rows are blue. | I2C1, GP14 SDA, GP15 SCL, address `0x3C`. |
 | MPU-6050 | Tilt. Liquid pours with it. Galaxy tilts its disk with it. Solar looks around the orrery and around each world with it. | Same I2C bus as the OLED, address `0x68`. |
-| Analogue microphone | Loudness and pitch for liquid. The module name is absent from the firmware. | GP27, ADC input 1. |
+| Analogue microphone | Loudness and pitch for liquid, and the beat for flow field. The module name is absent from the firmware. | GP27, ADC input 1. |
 | Five momentary buttons | Red, orange, yellow, green, and blue. Each button also has an LED on the 12 V feed above. | Each switch common goes to its GPIO. Each normally open contact goes to ground. The pin pull-up makes a press read as low. On the blue button, ground is the yellow wire. If a button behaves as if it is being held, try yellow for ground. The LEDs take 12 V from an MT3608 set to 12 V. |
 | BAOMAIN 5-pin button harness | One plug on each momentary button. The lead is 15 cm, and the ends are stripped. https://www.amazon.ca/dp/B09NN28Q1B | Red is the lamp positive, and black is the lamp negative. Green is the switch common and goes to that button's GPIO. Blue is the normally open contact and goes to ground. Yellow is the normally closed contact, closed to green while the button is up. On the blue button, ground is the yellow wire. If a button behaves as if it is being held, try yellow for ground. |
 | Quadrature encoder with a click | Pattern list, sideways fling, and the controls named per pattern below. | A is GP16, B is GP17, click is GP18. Each goes to ground. Clockwise is A changing before B. |
@@ -110,7 +110,7 @@ Mirrors, the turn, and the sideways slide belong to the pattern that was showing
 
 ## Patterns
 
-Plasma is 1. Settings, INTRO, and the reset prompts have no number. The yellow band shows the name, and the pattern number sits on the right of that band. The blue band draws slow waves that follow the mirrors, the turn, and a sideways slide. Liquid replaces those waves with the microphone state and an equalizer.
+Plasma is 1. Settings, INTRO, and the reset prompts have no number. The yellow band shows the name, and the pattern number sits on the right of that band. The blue band draws slow waves that follow the mirrors, the turn, and a sideways slide. Liquid and flow field replace those waves with the microphone state and an equalizer.
 
 | No. | Name | Picture |
 | --- | --- | --- |
@@ -119,7 +119,7 @@ Plasma is 1. Settings, INTRO, and the reset prompts have no number. The yellow b
 | 3 | feedback | Each frame samples the previous frame closer to the centre, turns it, and adds a soft spot. The picture smears into a tunnel. |
 | 4 | metaballs | Moving balls added into one field. They merge where they meet. |
 | 5 | life | Conway's Life on the whole panel. Colour is how long a cell has lived. A fresh board starts when the population stalls, or every 45 seconds. |
-| 6 | flow field | Particles trace a slowly turning noise field. Colour follows the direction they travel. |
+| 6 | flow field | Particles trace a slowly turning noise field. Colour follows the direction they travel. A beat brightens the picture, shifts its hue, and hurries the streams. |
 | 7 | voronoi cells | Fourteen drifting seeds and the regions they claim, shaded like stained glass. |
 | 8 | loop | Langton's loop. A generation that changes nothing plants the loop at a new spot. |
 | 9 | liquid | A square cup seen from above. Tilt pours a pool against the low walls and slides a web of light toward the low side. Sound spreads the pool, tints it, places a glint, and bends that web into a ring. |
@@ -143,11 +143,15 @@ Campfire, lighthouse, ferris wheel, aurora, and fireworks keep the 64 by 64 pict
 
 ### Flow field
 
-The encoder sets how much of the panel the streams cover. Clockwise fills more of the panel. The sparse end covers about 15 percent. The busy end covers about 75 percent. Red, orange, yellow, green, and blue keep their shared actions.
+The encoder sets how much of the panel the streams cover. Clockwise fills more of the panel. The sparse end covers about 15 percent. The busy end covers about 75 percent.
+
+Green starts and stops the microphone. Listening starts on. Yellow adds a round mirror. Orange still adds a diagonal mirror. Red and blue keep their shared actions.
+
+A beat brightens the picture a little, shifts its hue, and hurries the streams, then all three ease back. The beat is the same onset liquid uses. Microphone sensitivity is on the settings page. 50 percent is the response tuned for liquid, and flow field uses that same ear.
 
 ### Liquid
 
-Yellow starts and stops the microphone. Listening starts on. Orange still adds a diagonal mirror. The other shared controls stay.
+Green starts and stops the microphone. Listening starts on. Yellow adds a round mirror. Orange still adds a diagonal mirror. Red, blue, and the encoder keep their shared actions.
 
 Tilt pours the pool and slides the light in it toward the low side. Flat and face up holds the pool in the middle, and the web drifts there on its own. A sound spreads the pool and bends the web into a ring. Microphone sensitivity and tilt sensitivity are on the settings page. 50 percent is the response tuned for this pattern.
 

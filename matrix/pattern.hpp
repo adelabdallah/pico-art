@@ -248,6 +248,12 @@ void environment_start();
 void environment_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 bool environment_listening();
 void environment_toggle_listen();
+// Turns the microphone on. Flow field calls this on entry, the same way liquid does.
+void environment_arm_listen();
+// Samples the microphone when listening, and moves its clock forward by dt_ms.
+void environment_hear(int dt_ms);
+// True for the frame environment_hear caught a beat.
+bool environment_beat_hit();
 float environment_meter();
 bool environment_meter_peak();
 // Live accelerometer X and Y in g. False when the read fails.

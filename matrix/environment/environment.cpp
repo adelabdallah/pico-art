@@ -15,7 +15,7 @@
 // While listening, loudness tints the pool, lifts the lines, speeds their
 // drift, and pitch places a glint.
 // A rise in the sound kinks the lines into a ring that travels from the
-// shore into the pool.
+// shore into the pool. That same rise is the beat flow field uses.
 // The microphone does not change down.
 // Mic and tilt sensitivity come from the settings page.
 // 50 percent is the response tuned in this file.
@@ -69,7 +69,9 @@ constexpr float CAUSTIC_BEND = 1.05f;
 
 static float zero_x = 0.0f;
 static float zero_y = 0.0f;
-static uint32_t clock_ms = 0;
+static uint32_t audio_ms = 0;
+static bool beat_hit = false;
+static bool adc_ready = false;
 static float flow_x = 0.0f;
 static float flow_y = 0.0f;
 static float sensed_x = 0.0f;
@@ -288,6 +290,7 @@ static void listen_audio(uint32_t now) {
     bool onset = loud > ONSET_RMS && rms * gain > noise_rms * 1.9f && (int32_t)(now - last_onset_ms) >= ONSET_GAP_MS;
     if (onset) {
         last_onset_ms = now;
+        beat_hit = true;
         float watery = 1.0f - thickness();
         launch_ripple(clampf(loud / COLOUR_RMS, 0.4f, 1.0f) * watery);
         float kicked = 280.0f * watery;
@@ -542,8 +545,48 @@ static void paint(uint8_t *frame) {
     }
 }
 
+static void ensure_adc() {
+    if (adc_ready) {
+        return;
+    }
+    adc_init();
+    adc_gpio_init(PIN_MIC);
+    adc_select_input(1);
+    adc_ready = true;
+}
+
 bool environment_listening() {
     return listening;
+}
+
+void environment_arm_listen() {
+    ensure_adc();
+    listening = true;
+    beat_hit = false;
+}
+
+bool environment_beat_hit() {
+    return beat_hit;
+}
+
+void environment_hear(int dt_ms) {
+    beat_hit = false;
+    if (dt_ms <= 0) {
+        return;
+    }
+    ensure_adc();
+    audio_ms += (uint32_t)dt_ms;
+    if (!listening) {
+        heard = 0.0f;
+        meter_level = 0.0f;
+        meter_peak = false;
+        glint = 0.0f;
+        for (int i = 0; i < BANDS; ++i) {
+            band_level[i] = 0.0f;
+        }
+        return;
+    }
+    listen_audio(audio_ms);
 }
 
 void environment_toggle_listen() {
@@ -654,11 +697,8 @@ void environment_start() {
     if (wake_mpu()) {
         capture_zero();
     }
-    adc_init();
-    adc_gpio_init(PIN_MIC);
-    adc_select_input(1);
-    clock_ms = 0;
-    last_sample_ms = 0;
+    ensure_adc();
+    last_sample_ms = audio_ms;
     last_onset_ms = 0;
 }
 
@@ -671,15 +711,7 @@ void environment_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     if (mpu_ready) {
         update_gravity();
     }
-    clock_ms += (uint32_t)dt_ms;
-    if (listening) {
-        listen_audio(clock_ms);
-    } else {
-        heard = 0.0f;
-        for (int i = 0; i < BANDS; ++i) {
-            band_level[i] = 0.0f;
-        }
-    }
+    environment_hear(dt_ms);
     step_pool(dt_s);
     paint(frame);
 }
