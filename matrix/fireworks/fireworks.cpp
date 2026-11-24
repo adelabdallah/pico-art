@@ -4,6 +4,8 @@
 
 // Shells still launch on their own, at half the earlier pace.
 // Orange launches a small shell. Yellow launches a large one.
+// Windows blink on their own, each in a random colour.
+// Green sends one spinning star across the sky, from either side. A hold sends more, both ways. Shells keep launching.
 
 #include "pattern.hpp"
 
@@ -42,6 +44,29 @@ struct Shell {
 };
 
 static Shell launched[4];
+
+constexpr int SHOOT_CAP = 8;
+constexpr int SHOOT_TRAIL = 12;
+constexpr int SHOOT_RING = 10;
+constexpr float SHOOT_RADIUS = 3.0f;
+constexpr float SHOOT_EVERY_MS = 240.0f;
+constexpr float SHOOT_HUE_RATE = 2.4f;
+constexpr float SHOOT_SPIN = 9.4f;
+
+struct Shoot {
+    float age;
+    float duration;
+    float ends;
+    float arc;
+    float hue0;
+    float spin0;
+    float dir;
+    bool on;
+};
+
+static Shoot shoots[SHOOT_CAP];
+static bool shoot_held = false;
+static float shoot_wait_ms = 0.0f;
 
 static const uint8_t HUE[HUE_COUNT][3] = {
     {255, 64, 64},
@@ -126,6 +151,150 @@ void fireworks_start() {
     for (int i = 0; i < 4; ++i) {
         launched[i].on = false;
     }
+    for (int i = 0; i < SHOOT_CAP; ++i) {
+        shoots[i].on = false;
+    }
+    shoot_held = false;
+    shoot_wait_ms = 0.0f;
+}
+
+static bool spawn_shoot() {
+    int slot = -1;
+    for (int i = 0; i < SHOOT_CAP; ++i) {
+        if (!shoots[i].on) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        return false;
+    }
+    Shoot &shoot = shoots[slot];
+    shoot.on = true;
+    shoot.age = 0.0f;
+    shoot.duration = 1.8f + rnd() * 0.8f;
+    shoot.dir = rnd() < 0.5f ? 1.0f : -1.0f;
+    shoot.spin0 = rnd() < 0.5f ? 1.0f : -1.0f;
+    shoot.hue0 = rnd();
+    float sky = (float)(PANEL_HEIGHT - 20);
+    if (sky < 16.0f) {
+        sky = 16.0f;
+    }
+    shoot.ends = 10.0f + rnd() * sky * 0.42f;
+    if (shoot.ends > (float)PANEL_HEIGHT - 22.0f) {
+        shoot.ends = (float)PANEL_HEIGHT - 22.0f;
+    }
+    shoot.arc = 6.0f + rnd() * 16.0f;
+    if (shoot.ends - shoot.arc < 1.0f) {
+        shoot.arc = shoot.ends - 1.0f;
+    }
+    if (shoot.arc < 4.0f) {
+        shoot.arc = 4.0f;
+    }
+    return true;
+}
+
+static void shoot_at(const Shoot &shoot, float age, float &x, float &y) {
+    float t = age / shoot.duration;
+    if (t < 0.0f) {
+        t = 0.0f;
+    }
+    if (t > 1.0f) {
+        t = 1.0f;
+    }
+    float span = (float)PANEL_WIDTH + 12.0f;
+    if (shoot.dir > 0.0f) {
+        x = -6.0f + span * t;
+    } else {
+        x = (float)PANEL_WIDTH + 6.0f - span * t;
+    }
+    y = shoot.ends - sinf(t * 3.14159265f) * shoot.arc;
+}
+
+static void shoot_colour(float turns, float level, int &red, int &green, int &blue) {
+    red = 255;
+    green = 48;
+    blue = 64;
+    hue_shift(red, green, blue, turns);
+    red = (int)(red * level);
+    green = (int)(green * level);
+    blue = (int)(blue * level);
+}
+
+static void advance_shoots(int dt_ms) {
+    if (dt_ms < 0) {
+        dt_ms = 0;
+    }
+    if (shoot_held) {
+        shoot_wait_ms += (float)dt_ms;
+        int guard = 0;
+        while (shoot_wait_ms >= SHOOT_EVERY_MS && guard < SHOOT_CAP) {
+            if (!spawn_shoot()) {
+                shoot_wait_ms = SHOOT_EVERY_MS;
+                break;
+            }
+            shoot_wait_ms -= SHOOT_EVERY_MS;
+            guard += 1;
+        }
+    }
+    float step = dt_ms * 0.001f;
+    for (int i = 0; i < SHOOT_CAP; ++i) {
+        Shoot &shoot = shoots[i];
+        if (!shoot.on) {
+            continue;
+        }
+        shoot.age += step;
+        if (shoot.age > shoot.duration) {
+            shoot.on = false;
+        }
+    }
+}
+
+static void paint_shoots(uint8_t *frame) {
+    for (int i = 0; i < SHOOT_CAP; ++i) {
+        const Shoot &shoot = shoots[i];
+        if (!shoot.on) {
+            continue;
+        }
+        for (int s = SHOOT_TRAIL; s >= 1; --s) {
+            float back = (float)s * 0.04f;
+            if (back > shoot.age) {
+                continue;
+            }
+            float past = shoot.age - back;
+            float x;
+            float y;
+            shoot_at(shoot, past, x, y);
+            float level = (1.0f - (float)s / (float)(SHOOT_TRAIL + 1)) * 0.85f;
+            int red;
+            int green;
+            int blue;
+            shoot_colour(shoot.hue0 + past * SHOOT_HUE_RATE, level, red, green, blue);
+            put(frame, (int)(x + 0.5f), (int)(y + 0.5f), red, green, blue);
+        }
+        float hx;
+        float hy;
+        shoot_at(shoot, shoot.age, hx, hy);
+        float turns = shoot.hue0 + shoot.age * SHOOT_HUE_RATE;
+        float spin = shoot.spin0 * (shoot.age * SHOOT_SPIN);
+        int red;
+        int green;
+        int blue;
+        shoot_colour(turns, 1.0f, red, green, blue);
+        for (int p = 0; p < SHOOT_RING; ++p) {
+            float theta = spin + (float)p / (float)SHOOT_RING * TAU;
+            int x = (int)(hx + cosf(theta) * SHOOT_RADIUS + 0.5f);
+            int y = (int)(hy + sinf(theta) * SHOOT_RADIUS + 0.5f);
+            put(frame, x, y, red, green, blue);
+        }
+        for (int p = 0; p < 5; ++p) {
+            float theta = spin * 1.4f + (float)p / 5.0f * TAU;
+            int x = (int)(hx + cosf(theta) * (SHOOT_RADIUS * 0.45f) + 0.5f);
+            int y = (int)(hy + sinf(theta) * (SHOOT_RADIUS * 0.45f) + 0.5f);
+            put(frame, x, y, red, green, blue);
+        }
+        put(frame, (int)(hx + 0.5f), (int)(hy + 0.5f), red, green, blue);
+    }
 }
 
 void fireworks_launch(bool large) {
@@ -160,9 +329,25 @@ void fireworks_launch(bool large) {
     launch_id += 1;
 }
 
+void fireworks_shoot() {
+    spawn_shoot();
+}
+
+void fireworks_shoot_held(bool held) {
+    if (held) {
+        if (!shoot_held) {
+            shoot_wait_ms = SHOOT_EVERY_MS;
+        }
+        shoot_held = true;
+        return;
+    }
+    shoot_held = false;
+}
+
 void fireworks_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     float seconds = anim_ms * 0.001f;
     float step = dt_ms * 0.001f;
+    advance_shoots(dt_ms);
     if (step < 0.0f) {
         step = 0.0f;
     }
@@ -272,13 +457,27 @@ void fireworks_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
         int height = skyline[x];
         for (int k = 0; k < height; ++k) {
             int y = PANEL_HEIGHT - 1 - k;
-            bool lit = (x % 2 == 0) && (k % 2 == 1) && window_roll[x] > 0.4f && k < height - 1;
-            if (lit) {
-                put(frame, x, y, 255, 200, 110);
+            bool window = (x % 2 == 0) && (k % 2 == 1) && window_roll[x] > 0.4f && k < height - 1;
+            if (window) {
+                float period = 0.35f + hash_unit(x * 5, k + 1) * 1.3f;
+                float duty = 0.28f + hash_unit(k + 4, x + 9) * 0.42f;
+                float cycle = fmodf(seconds + hash_unit(x, k + 3) * period, period) / period;
+                if (cycle < duty) {
+                    int hue = (int)(hash_unit(x + 11, k + 17) * HUE_COUNT);
+                    if (hue >= HUE_COUNT) {
+                        hue = HUE_COUNT - 1;
+                    }
+                    const uint8_t *colour = HUE[hue];
+                    put(frame, x, y, colour[0], colour[1], colour[2]);
+                } else {
+                    int level = k == height - 1 ? 18 : 8;
+                    put(frame, x, y, level, level, level + 6);
+                }
             } else {
                 int level = k == height - 1 ? 18 : 8;
                 put(frame, x, y, level, level, level + 6);
             }
         }
     }
+    paint_shoots(frame);
 }

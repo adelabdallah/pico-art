@@ -187,7 +187,11 @@ The encoder changes how fast the wheel moves. Clockwise is faster. The rim light
 
 ### Fireworks
 
-Orange launches a small shell. Yellow launches a large one. Red, green, blue, and the encoder keep their shared actions.
+Orange launches a small shell. Yellow launches a large one. Shells still launch on their own.
+
+Windows blink on their own. Each lit window keeps a random colour.
+
+Green sends one shooting star across the sky. It leaves from the left or the right at random, arcs over the buildings, and spins about its centre as it goes. The head is about the size of a small shell. The head and the trail shift hue quickly and smoothly. Holding green sends more stars, some each way. Shells keep launching while the stars fly. Letting go stops new stars, and each star already in the sky finishes its crossing. Red, blue, and the encoder keep their shared actions.
 
 ### Galaxy
 

@@ -56,6 +56,7 @@
 // On campfire, orange throws sparks and yellow flares the flame. Holding either keeps that going.
 // Green sends one comet across the milky way. A hold keeps a meteor shower along that band, and letting go thins new meteors out over 3 seconds. The picture stays upright.
 // On fireworks, orange launches a small shell and yellow a large one. Shells still launch on their own, at half the earlier pace.
+// Green sends one spinning star across the sky, from either side. A hold sends more, both ways. Shells keep launching.
 // On galaxy, orange flies in to the solar orrery along the same path. The solar system sits on the outer tip of one arm.
 // On galaxy, tipping the panel tilts the disk. Flat and face up is the resting oval. A steeper tip draws it thinner.
 // Tipping the panel looks around the hoops, and around a close-up the same way. The world stays centred. Flat and face up is the resting view.
@@ -1727,6 +1728,17 @@ static void poll_button(PanelButton &button, uint32_t now) {
     if (on_fireworks() && button.role == ButtonRole::Circle) {
         if (pressed) {
             fireworks_launch(true);
+        }
+        return;
+    }
+    if (on_fireworks() && button.role == ButtonRole::Spin) {
+        if (pressed) {
+            fireworks_shoot();
+        }
+        if (released) {
+            fireworks_shoot_held(false);
+        } else if (down && (int32_t)(now - button.pressed_at) >= HOLD_MS) {
+            fireworks_shoot_held(true);
         }
         return;
     }

@@ -314,6 +314,8 @@ void aurora_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 void fireworks_start();
 void fireworks_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 void fireworks_launch(bool large);
+void fireworks_shoot();
+void fireworks_shoot_held(bool held);
 
 void galaxy_start();
 void galaxy_ensure();

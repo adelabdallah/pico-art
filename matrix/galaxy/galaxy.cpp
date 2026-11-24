@@ -5,9 +5,9 @@
 // The encoder speeds the disk. The background stars keep their own pace.
 // Tipping the panel tilts the disk. Flat and face up keeps the resting oval, and a steeper tip draws it thinner.
 // Orange flies in from that tip to the orrery.
+// Outside the disk the sky is one night colour. The arms are a smooth spiral.
 
 #include "pattern.hpp"
-#include "noise.hpp"
 
 #include <cmath>
 
@@ -63,48 +63,77 @@ static void build_field() {
     }
 }
 
-static void shade(float px, float py, int &red, int &green, int &blue) {
-    float tilt_c = cosf(tilt_angle);
-    float tilt_s = sinf(tilt_angle);
-    float spin_c = cosf(-spin_angle);
-    float spin_s = sinf(-spin_angle);
-    float dx = px - panel_cx();
-    float dy = py - panel_cy();
-    float u = dx * tilt_c + dy * tilt_s;
-    float w = (-dx * tilt_s + dy * tilt_c) / tilt_squash;
-    float rad = sqrtf(u * u + w * w) / panel_s(1.0f) + 0.001f;
-    float gu = u * spin_c - w * spin_s;
-    float gw = u * spin_s + w * spin_c;
+// Tilt, spin, and the disk scale are constant for a frame. The spiral fades out by radius 48.
+struct DiskBasis {
+    float tilt_c;
+    float tilt_s;
+    float spin_c;
+    float spin_s;
+    float cx;
+    float cy;
+    float unit;
+    float inv_squash;
+};
+
+static void disk_basis(DiskBasis &basis) {
+    basis.tilt_c = cosf(tilt_angle);
+    basis.tilt_s = sinf(tilt_angle);
+    basis.spin_c = cosf(-spin_angle);
+    basis.spin_s = sinf(-spin_angle);
+    basis.cx = panel_cx();
+    basis.cy = panel_cy();
+    basis.unit = panel_s(1.0f);
+    if (basis.unit < 0.001f) {
+        basis.unit = 0.001f;
+    }
+    float squash = tilt_squash;
+    if (squash < 0.06f) {
+        squash = 0.06f;
+    }
+    basis.inv_squash = 1.0f / squash;
+}
+
+static void night(int &red, int &green, int &blue) {
+    red = 5;
+    green = 9;
+    blue = 22;
+}
+
+static bool shade_disk(const DiskBasis &basis, float px, float py, int &red, int &green, int &blue) {
+    float dx = px - basis.cx;
+    float dy = py - basis.cy;
+    float u = dx * basis.tilt_c + dy * basis.tilt_s;
+    float w = (-dx * basis.tilt_s + dy * basis.tilt_c) * basis.inv_squash;
+    float rad = sqrtf(u * u + w * w) / basis.unit + 0.001f;
+    if (rad > 48.0f) {
+        return false;
+    }
+    float gu = u * basis.spin_c - w * basis.spin_s;
+    float gw = u * basis.spin_s + w * basis.spin_c;
     float theta = atan2f(gw, gu);
     float arm_phase = 2.0f * (theta - logf(rad) / ARM_K);
-    float arm = powf(0.5f + 0.5f * cosf(arm_phase), 2.2f);
-    float lane = powf(0.5f + 0.5f * cosf(arm_phase + 0.9f), 6.0f);
-    float clump = field_fbm(gu * 0.22f + 40.0f, gw * 0.22f, 2, 5);
+    float arm_w = 0.5f + 0.5f * cosf(arm_phase);
+    float arm = arm_w * arm_w;
+    float lane_w = 0.5f + 0.5f * cosf(arm_phase + 0.9f);
+    float lane2 = lane_w * lane_w;
+    float lane = lane2 * lane2 * lane2;
     float bulge = expf(-rad / 5.0f) * 1.45f;
-    float disk = expf(-rad / 16.0f) * (0.2f + 1.3f * arm * (0.45f + clump)) * (1.0f - 0.5f * lane * clampf(rad / 8.0f, 0.0f, 1.0f));
+    float disk = expf(-rad / 16.0f) * (0.2f + 1.24f * arm) * (1.0f - 0.5f * lane * clampf(rad / 8.0f, 0.0f, 1.0f));
     float intensity = clampf(bulge + disk, 0.0f, 1.0f);
     if (intensity < 0.08f) {
-        float haze = field_fbm((px - 0.5f) * 0.06f, (py - 0.5f) * 0.08f, 2, 2);
-        int level = (int)(clampf(haze * 0.7f, 0.0f, 1.0f) * 28);
-        red = level / 2;
-        green = level / 2 + 4;
-        blue = 12 + level;
-        return;
+        return false;
     }
     float warm = clampf(bulge / (bulge + disk + 0.001f) * 1.4f - 0.15f, 0.0f, 1.0f);
     if (warm > 0.5f) {
         red = (int)(50 + intensity * 205);
         green = (int)(30 + intensity * 180);
         blue = (int)(16 + intensity * 120);
-    } else if (arm > 0.6f && clump > 0.62f && rad > 8.0f) {
-        red = (int)(140 + (clump - 0.62f) * 300);
-        green = (int)(40 + (clump - 0.62f) * 120);
-        blue = (int)(90 + (clump - 0.62f) * 160);
     } else {
         red = (int)(12 + intensity * 120 + warm * 80);
         green = (int)(24 + intensity * 140);
         blue = (int)(50 + intensity * 190);
     }
+    return true;
 }
 
 static void home_screen(float &sx, float &sy) {
@@ -211,6 +240,8 @@ void galaxy_paint_at(uint8_t *frame, uint32_t anim_ms, float scale, float tip_x,
         scale = 0.001f;
     }
     float inv = 1.0f / scale;
+    DiskBasis basis;
+    disk_basis(basis);
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
         for (int x = 0; x < PANEL_WIDTH; ++x) {
             float px = tip_x + ((x + 0.5f) - aim_x) * inv;
@@ -218,7 +249,9 @@ void galaxy_paint_at(uint8_t *frame, uint32_t anim_ms, float scale, float tip_x,
             int red;
             int green;
             int blue;
-            shade(px, py, red, green, blue);
+            if (!shade_disk(basis, px, py, red, green, blue)) {
+                night(red, green, blue);
+            }
             put(frame, x, y, red, green, blue);
         }
     }
