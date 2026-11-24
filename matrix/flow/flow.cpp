@@ -38,7 +38,7 @@ struct Particle {
     uint32_t cycle;
 };
 
-static Particle particles[COUNT];
+static Particle *particles = nullptr;
 static uint32_t rng_state = 1;
 
 static float rnd() {
@@ -114,6 +114,7 @@ static void trail_colour(int hue, float level, int &red, int &green, int &blue) 
 }  // namespace
 
 void flow_start() {
+    particles = (Particle *)pattern_alloc((int)sizeof(Particle) * COUNT);
     rng_state = 9;
     for (int i = 0; i < COUNT; ++i) {
         particles[i].cycle = 0;

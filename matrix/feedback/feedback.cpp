@@ -7,24 +7,22 @@
 
 #include "pattern.hpp"
 
-constexpr float CX = (PANEL_WIDTH - 1) / 2.0f;
-constexpr float CY = (PANEL_HEIGHT - 1) / 2.0f;
 constexpr float PI = 3.14159265f;
 constexpr float ZOOM = 1.028f;
 
-static uint8_t history[PANEL_PIXELS * 3];
+static uint8_t *history = nullptr;
 
-static float wrap_coord(float value) {
-    float wrapped = fmodf(value, (float)PANEL_WIDTH);
+static float wrap_coord(float value, int limit) {
+    float wrapped = fmodf(value, (float)limit);
     if (wrapped < 0.0f) {
-        wrapped += (float)PANEL_WIDTH;
+        wrapped += (float)limit;
     }
     return wrapped;
 }
 
 static void sample_history(float sx, float sy, int &red, int &green, int &blue) {
-    sx = wrap_coord(sx);
-    sy = wrap_coord(sy);
+    sx = wrap_coord(sx, PANEL_WIDTH);
+    sy = wrap_coord(sy, PANEL_HEIGHT);
     int x0 = (int)sx;
     int y0 = (int)sy;
     float tx = sx - x0;
@@ -48,7 +46,7 @@ static void sample_history(float sx, float sy, int &red, int &green, int &blue) 
 }
 
 void feedback_start() {
-    memset(history, 0, sizeof history);
+    history = pattern_alloc(PANEL_PIXELS * 3);
 }
 
 void feedback_draw(uint8_t *pixels, uint32_t anim_ms, int dt_ms) {
@@ -57,17 +55,17 @@ void feedback_draw(uint8_t *pixels, uint32_t anim_ms, int dt_ms) {
     float turn = time * 0.22f;
     float turn_cos = cosf(turn);
     float turn_sin = sinf(turn);
-    float spot_x = CX + cosf(time * 0.83f) * 14.0f;
-    float spot_y = CY + sinf(time * 0.57f) * 14.0f;
+    float spot_x = panel_cx() + cosf(time * 0.83f) * panel_sx(14.0f);
+    float spot_y = panel_cy() + sinf(time * 0.57f) * panel_sy(14.0f);
     float tint = time * 0.37f;
 
     uint8_t *pixel = pixels;
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
         for (int x = 0; x < PANEL_WIDTH; ++x) {
-            float dx = x - CX;
-            float dy = y - CY;
-            float sx = CX + (dx * turn_cos - dy * turn_sin) / ZOOM;
-            float sy = CY + (dx * turn_sin + dy * turn_cos) / ZOOM;
+            float dx = x - panel_cx();
+            float dy = y - panel_cy();
+            float sx = panel_cx() + (dx * turn_cos - dy * turn_sin) / ZOOM;
+            float sy = panel_cy() + (dx * turn_sin + dy * turn_cos) / ZOOM;
             sx += sinf(y * 0.18f + time * 1.4f) * 1.1f;
             sy += cosf(x * 0.18f + time * 1.1f) * 1.1f;
 

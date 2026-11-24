@@ -42,7 +42,9 @@ constexpr int CYAN_R = 77;
 constexpr int CYAN_G = 208;
 constexpr int CYAN_B = 225;
 
-constexpr int BORDER_LEN = 252;
+static int border_len() {
+    return 2 * (PANEL_WIDTH + PANEL_HEIGHT) - 4;
+}
 constexpr int STAR_COUNT = 150;
 constexpr int BUBBLE_COUNT = 10;
 
@@ -609,11 +611,10 @@ static void stroke_star(uint8_t *frame, float x0, float y0, float x1, float y1, 
 static void paint_stars(uint8_t *frame) {
     float cover = star_cover();
     float zoom_u = elapsed < (uint32_t)ZOOM_AT ? 0.0f : span_u(ZOOM_AT, ZOOM_MS);
-    float lens = 16.0f * star_zoom();
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
         for (int x = 0; x < PANEL_WIDTH; ++x) {
-            float dx = (x + 0.5f - 31.5f) / 32.0f;
-            float dy = (y + 0.5f - 31.5f) / 32.0f;
+            float dx = (x + 0.5f - panel_cx()) / (PANEL_WIDTH * 0.5f);
+            float dy = (y + 0.5f - panel_cy()) / (PANEL_HEIGHT * 0.5f);
             float dist = hypotf(dx, dy);
             float core = expf(-dist * (3.4f - zoom_u * 2.2f));
             float ring = expf(-(dist - 0.62f) * (dist - 0.62f) * 14.0f);
@@ -638,10 +639,12 @@ static void paint_stars(uint8_t *frame) {
             continue;
         }
         float z0 = star.z + 0.03f + pace * 0.03f;
-        float x1 = 31.5f + star.x * lens / star.z;
-        float y1 = 31.5f + star.y * lens / star.z;
-        float x0 = 31.5f + star.x * lens / z0;
-        float y0 = 31.5f + star.y * lens / z0;
+        float lens_x = panel_sx(16.0f) * star_zoom();
+        float lens_y = panel_sy(16.0f) * star_zoom();
+        float x1 = panel_cx() + star.x * lens_x / star.z;
+        float y1 = panel_cy() + star.y * lens_y / star.z;
+        float x0 = panel_cx() + star.x * lens_x / z0;
+        float y0 = panel_cy() + star.y * lens_y / z0;
         int red = 0;
         int green = 0;
         int blue = 0;
@@ -740,12 +743,18 @@ struct PlacedLine {
 constexpr float BOOT_SWAY = 0.09f;
 
 static float boot_fit(int full_w, int full_h) {
-    float extent = (float)full_w * cosf(BOOT_SWAY) + (float)full_h * sinf(BOOT_SWAY);
-    float limit = (float)PANEL_WIDTH - 2.0f;
-    if (extent <= limit) {
-        return 1.0f;
+    float extent_x = (float)full_w * cosf(BOOT_SWAY) + (float)full_h * sinf(BOOT_SWAY);
+    float extent_y = (float)full_w * sinf(BOOT_SWAY) + (float)full_h * cosf(BOOT_SWAY);
+    float fit = 1.0f;
+    float limit_x = (float)PANEL_WIDTH - 2.0f;
+    float limit_y = (float)PANEL_HEIGHT - 2.0f;
+    if (extent_x > limit_x) {
+        fit = limit_x / extent_x;
     }
-    return limit / extent;
+    if (extent_y * fit > limit_y) {
+        fit = limit_y / extent_y;
+    }
+    return fit;
 }
 
 static bool boot_ink(const Stamp &stamp, float sx, float sy, float scale, int &index) {
@@ -839,17 +848,17 @@ static void paint_boot(uint8_t *frame, bool over_stars) {
     float fill = span_u(0, BOOT_FILL_MS);
     float cosine = cosf(ang);
     float sine = sinf(ang);
-    float cy = 31.5f + bob;
+    float cy = panel_cy() + bob;
     constexpr float LINE_GAP = 4.0f;
     float block_h = (float)lines[0].stamp.height * lines[0].scale;
     if (line_count == 2) {
         block_h += LINE_GAP + (float)lines[1].stamp.height * lines[1].scale;
     }
     float block_top = cy - block_h * 0.5f;
-    lines[0].left = 31.5f - lines[0].stamp.width * lines[0].scale * 0.5f;
+    lines[0].left = panel_cx() - lines[0].stamp.width * lines[0].scale * 0.5f;
     lines[0].top = block_top;
     if (line_count == 2) {
-        lines[1].left = 31.5f - lines[1].stamp.width * lines[1].scale * 0.5f;
+        lines[1].left = panel_cx() - lines[1].stamp.width * lines[1].scale * 0.5f;
         lines[1].top = block_top + (float)lines[0].stamp.height * lines[0].scale + LINE_GAP;
     }
     float turns = sec / 0.7f;
@@ -858,9 +867,9 @@ static void paint_boot(uint8_t *frame, bool over_stars) {
             if (grid_at(x, y)) {
                 put(frame, x, y, 14, 42, 58, gain);
             }
-            float dx = (x + 0.5f) - 31.5f;
+            float dx = (x + 0.5f) - panel_cx();
             float dy = (y + 0.5f) - cy;
-            float px = 31.5f + dx * cosine + dy * sine;
+            float px = panel_cx() + dx * cosine + dy * sine;
             float py = cy + -dx * sine + dy * cosine;
             for (int line = 0; line < line_count; ++line) {
                 float wx = px - lines[line].left;
@@ -924,30 +933,34 @@ static void paint_boot(uint8_t *frame, bool over_stars) {
 }
 
 static void border_at(int index, int &x, int &y) {
-    int i = index % BORDER_LEN;
+    int length = border_len();
+    int i = index % length;
     if (i < 0) {
-        i += BORDER_LEN;
+        i += length;
     }
-    if (i < 64) {
+    int top = PANEL_WIDTH;
+    int right = PANEL_HEIGHT - 1;
+    int bottom = PANEL_WIDTH - 1;
+    if (i < top) {
         x = i;
         y = 0;
         return;
     }
-    i -= 64;
-    if (i < 63) {
+    i -= top;
+    if (i < right) {
         x = PANEL_WIDTH - 1;
         y = 1 + i;
         return;
     }
-    i -= 63;
-    if (i < 63) {
-        x = 62 - i;
+    i -= right;
+    if (i < bottom) {
+        x = PANEL_WIDTH - 2 - i;
         y = PANEL_HEIGHT - 1;
         return;
     }
-    i -= 63;
+    i -= bottom;
     x = 0;
-    y = 62 - i;
+    y = PANEL_HEIGHT - 2 - i;
 }
 
 static void rainbow_at(float t, int &red, int &green, int &blue) {
@@ -1001,21 +1014,21 @@ static void paint_border(uint8_t *frame, float alpha, float flash) {
     }
     // The lap ends in a flash. The full border locks after that pop.
     if (elapsed >= (uint32_t)CHASE_AT && elapsed < (uint32_t)POP_AT) {
-        paint_chase(frame, span_u(CHASE_AT, CHASE_MS) * (float)BORDER_LEN, alpha, 0.0f);
+        paint_chase(frame, span_u(CHASE_AT, CHASE_MS) * (float)border_len(), alpha, 0.0f);
         return;
     }
     if (elapsed >= (uint32_t)POP_AT && elapsed < (uint32_t)HOLD_AT) {
-        paint_chase(frame, (float)BORDER_LEN, alpha, flash);
+        paint_chase(frame, (float)border_len(), alpha, flash);
         return;
     }
-    for (int i = 0; i < BORDER_LEN; ++i) {
+    for (int i = 0; i < border_len(); ++i) {
         int x = 0;
         int y = 0;
         border_at(i, x, y);
         int red = 0;
         int green = 0;
         int blue = 0;
-        rainbow_at((float)i / (float)BORDER_LEN, red, green, blue);
+        rainbow_at((float)i / (float)border_len(), red, green, blue);
         red = mix_channel(red, 255, flash);
         green = mix_channel(green, 255, flash);
         blue = mix_channel(blue, 255, flash);
@@ -1299,14 +1312,19 @@ static void paint_splash(uint8_t *frame) {
     float ease = 1.0f - inv * inv * inv;
     Place xylo_at;
     Place scope_at;
-    // 28px tall, one pixel clear of the border, with a 2px gap between the words.
+    // One pixel clear of the border, with a 2px gap between the words.
     float word_left = (float)((PANEL_WIDTH - xylo.width) / 2);
-    rest_place(xylo_at, word_left, 3.0f, (float)xylo.width, (float)xylo.height);
-    rest_place(scope_at, word_left, 33.0f, (float)scope.width, (float)scope.height);
+    float block = (float)xylo.height + 2.0f + (float)scope.height;
+    float word_top = ((float)PANEL_HEIGHT - block) * 0.5f;
+    if (word_top < 3.0f) {
+        word_top = 3.0f;
+    }
+    rest_place(xylo_at, word_left, word_top, (float)xylo.width, (float)xylo.height);
+    rest_place(scope_at, word_left, word_top + (float)xylo.height + 2.0f, (float)scope.width, (float)scope.height);
     if (elapsed < (uint32_t)CHASE_AT) {
         xylo_at.shift = (1.0f - ease) * -(xylo_at.left + (float)xylo.width + 8.0f);
-        scope_at.ox = 31.5f;
-        scope_at.oy = 31.5f;
+        scope_at.ox = panel_cx();
+        scope_at.oy = panel_cy();
         scope_at.scale = ease;
         scope_at.live = ease >= 0.12f;
     }
@@ -1319,10 +1337,10 @@ static void paint_splash(uint8_t *frame) {
         float zoom = 1.0f + fly * fly * 10.0f;
         xylo_at.scale = zoom;
         scope_at.scale = zoom;
-        xylo_at.ox = 31.5f;
-        xylo_at.oy = 31.5f;
-        scope_at.ox = 31.5f;
-        scope_at.oy = 31.5f;
+        xylo_at.ox = panel_cx();
+        xylo_at.oy = panel_cy();
+        scope_at.ox = panel_cx();
+        scope_at.oy = panel_cy();
         xylo_at.shift = 0.0f;
         scope_at.shift = 0.0f;
     }

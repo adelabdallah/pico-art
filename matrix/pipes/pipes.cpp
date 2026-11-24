@@ -69,7 +69,7 @@ static int seg_count = 0;
 static int filled = 0;
 static Pipe pipes[PIPE_COUNT];
 static int grow_ms = 0;
-static uint16_t depth_buf[PANEL_PIXELS];
+static uint16_t *depth_buf = nullptr;
 
 static uint32_t rnd() {
     rng ^= rng << 13;
@@ -441,6 +441,7 @@ static void draw_scene(uint8_t *frame) {
 }  // namespace
 
 void pipes_start() {
+    depth_buf = (uint16_t *)pattern_alloc(PANEL_PIXELS * (int)sizeof(uint16_t));
     rng = 0xA341316Cu;
     grow_ms = 0;
     reset_scene();

@@ -6,8 +6,6 @@
 
 #include "pattern.hpp"
 
-constexpr float CX = (PANEL_WIDTH - 1) / 2.0f;
-constexpr float CY = (PANEL_HEIGHT - 1) / 2.0f;
 constexpr int BALL_COUNT = 5;
 
 struct Ball {
@@ -35,8 +33,8 @@ void metaballs_draw(uint8_t *pixels, uint32_t anim_ms, int dt_ms) {
     float ball_y[BALL_COUNT];
     for (int i = 0; i < BALL_COUNT; ++i) {
         Ball ball = balls[i];
-        ball_x[i] = CX + sinf(time * ball.speed + ball.phase) * ball.reach;
-        ball_y[i] = CY + cosf(time * ball.speed * 0.73f + ball.phase * 1.3f) * (ball.reach * 0.85f);
+        ball_x[i] = panel_cx() + sinf(time * ball.speed + ball.phase) * panel_sx(ball.reach);
+        ball_y[i] = panel_cy() + cosf(time * ball.speed * 0.73f + ball.phase * 1.3f) * panel_sy(ball.reach * 0.85f);
     }
 
     uint8_t *pixel = pixels;
@@ -46,7 +44,7 @@ void metaballs_draw(uint8_t *pixels, uint32_t anim_ms, int dt_ms) {
             for (int i = 0; i < BALL_COUNT; ++i) {
                 float dx = x - ball_x[i];
                 float dy = y - ball_y[i];
-                float radius = balls[i].radius;
+                float radius = panel_sx(balls[i].radius);
                 field += (radius * radius) / (dx * dx + dy * dy + 8.0f);
             }
             float body = smooth_unit(0.72f, 1.25f, field);

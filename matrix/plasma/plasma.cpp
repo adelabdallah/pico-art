@@ -9,10 +9,6 @@
 
 #include "pattern.hpp"
 
-constexpr float CX = (PANEL_WIDTH - 1) / 2.0f;
-constexpr float CY = (PANEL_HEIGHT - 1) / 2.0f;
-constexpr float PATTERN_X = 15.0f / (PANEL_WIDTH - 1);
-constexpr float PATTERN_Y = 6.0f / (PANEL_HEIGHT - 1);
 
 constexpr int SWEEP_MS = 2000;
 constexpr int PLASMA_PHASE_MS = 20;
@@ -129,14 +125,14 @@ void plasma_draw(uint8_t *pixels, uint32_t anim_ms, int dt_ms) {
     uint8_t *pixel = pixels;
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
         for (int x = 0; x < PANEL_WIDTH; ++x) {
-            float dx = x - CX;
-            float dy = y - CY;
-            float sx = CX + dx * view_cos + dy * view_sin;
-            float sy = CY - dx * view_sin + dy * view_cos;
+            float dx = x - panel_cx();
+            float dy = y - panel_cy();
+            float sx = panel_cx() + dx * view_cos + dy * view_sin;
+            float sy = panel_cy() - dx * view_sin + dy * view_cos;
             int red;
             int green;
             int blue;
-            plasma_rgb(sx * PATTERN_X, sy * PATTERN_Y, horizontal, phase, red, green, blue);
+            plasma_rgb(sx * (15.0f / (PANEL_WIDTH - 1)), sy * (6.0f / (PANEL_HEIGHT - 1)), horizontal, phase, red, green, blue);
             hue_shift(red, green, blue, hue);
             write_bgr(pixel, red, green, blue);
             pixel += 3;

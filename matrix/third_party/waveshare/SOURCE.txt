@@ -5,4 +5,4 @@ commit 413a8e04db2e46365b9b1922fa6db79c75afd01f
 Apache License 2.0. See LICENSE.
 
 src/ is the Pico HUB75 driver from example/Raspberry-Pi-Pico/Pico-SDK-2.2.0/src.
-The files are unchanged.
+hub75.cpp takes the chain length when the scan starts. The other files match that commit.

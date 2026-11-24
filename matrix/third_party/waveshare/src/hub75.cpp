@@ -25,6 +25,22 @@ uint8_t *dma_buffer;               ///< Front buffer — read by pixel_chan DMA 
 
 static uint32_t *rgb_buffer;
 
+// The xyloscope sets these from the saved panel count before the scan starts.
+// One panel clocks 64 columns. Two clock 128. Four clock 256, because the
+// top row sits in series with the bottom row.
+static uint32_t hub75_pixels = TOTAL_PIXELS;
+static uint32_t hub75_stream = PanelConfig::BITPLANE_STREAM_LENGTH;
+static int hub75_width = (int)MATRIX_PANEL_WIDTH;
+static int hub75_height = (int)MATRIX_PANEL_HEIGHT;
+
+static void hub75_use_geometry(uint width, uint height)
+{
+    hub75_width = (int)width;
+    hub75_height = (int)height;
+    hub75_pixels = width * height;
+    hub75_stream = hub75_pixels / 64u;
+}
+
 /**
  * @struct row_cmd_t
  * @brief Command structure for row control PIO state machine.
@@ -582,7 +598,7 @@ void read_chan_handler()
         hub75_bitplane_setup_set_shift(pio_config.pio_read, pio_config.sm_read, pio_config.offs_read, shamt);
 
         // Prepare DMA channels for building next bitplane
-        uint8_t *plane_dst = frame_buffer + (bitplane * (TOTAL_PIXELS >> 1));
+        uint8_t *plane_dst = frame_buffer + (bitplane * (hub75_pixels >> 1));
         dma_channel_set_write_addr(write_chan, plane_dst, false);
         dma_channel_set_read_addr(read_chan, rgb_buffer, false);
         dma_start_channel_mask((1u << read_chan) | (1u << write_chan));
@@ -623,7 +639,7 @@ static void setup_bitplane_creation()
         &read_chan_config,
         &pio_config.pio_read->txf[pio_config.sm_read], // Write to PIO TX FIFO
         nullptr,                                       // Read address set later
-        dma_encode_transfer_count(TOTAL_PIXELS),       // Total pixel (pairs) to process
+        dma_encode_transfer_count(hub75_pixels),       // Total pixel (pairs) to process
         false                                          // Don't start yet
     );
 
@@ -642,7 +658,7 @@ static void setup_bitplane_creation()
         &write_chan_config,
         nullptr,                                             // Write address set later
         &pio_config.pio_read->rxf[pio_config.sm_read],       // Read from PIO RX FIFO
-        dma_encode_transfer_count((TOTAL_PIXELS >> 1) >> 2), // Two colour informations per byte (xxr0g0b0r1b1g1) => (TOTAL_PIXELS >> 1)
+        dma_encode_transfer_count((hub75_pixels >> 1) >> 2), // Two colour informations per byte (xxr0g0b0r1b1g1) => (hub75_pixels >> 1)
                                                              // 4 bytes put in a transfered word => ((TOTAL_PIXELS >> 1) >> 2)
         false                                                // Don't start yet
     );
@@ -667,8 +683,9 @@ void setup_bitplane_stream_irq()
  */
 void create_hub75_driver(uint w, uint h, uint panel_type = PANEL_TYPE, bool inverted_stb = INVERTED_STB)
 {
-    frame_buffer1 = new uint8_t[(TOTAL_PIXELS >> 1) * bcm_sequence_length];
-    frame_buffer2 = new uint8_t[(TOTAL_PIXELS >> 1) * bcm_sequence_length];
+    hub75_use_geometry(w, h);
+    frame_buffer1 = new uint8_t[(hub75_pixels >> 1) * bcm_sequence_length];
+    frame_buffer2 = new uint8_t[(hub75_pixels >> 1) * bcm_sequence_length];
 
     dma_buffer = frame_buffer1;
     frame_buffer = frame_buffer2;
@@ -679,7 +696,7 @@ void create_hub75_driver(uint w, uint h, uint panel_type = PANEL_TYPE, bool inve
     dma_row_cmd_buffer = row_cmd_buffer1;
     row_cmd_buffer = row_cmd_buffer2;
 
-    rgb_buffer = new uint32_t[TOTAL_PIXELS]();
+    rgb_buffer = new uint32_t[hub75_pixels]();
 
     hub75_timing_init(&hub75_timing_config, clock_get_hz(clk_sys), (SM_CLOCKDIV_FACTOR < 1.0f) ? 1.0f : SM_CLOCKDIV_FACTOR);
 
@@ -798,7 +815,7 @@ static void configure_pio(bool inverted_stb)
     }
 #endif
 
-    hub75_bitplane_stream_program_init(pio_config.data_pio, pio_config.sm_data, pio_config.data_prog_offs, DATA_BASE_PIN, CLK_PIN, PanelConfig::BITPLANE_STREAM_LENGTH);
+    hub75_bitplane_stream_program_init(pio_config.data_pio, pio_config.sm_data, pio_config.data_prog_offs, DATA_BASE_PIN, CLK_PIN, hub75_stream);
 
     // Implementation of Pimoronis anti ghosting solution: https://github.com/pimoroni/pimoroni-pico/commit/9e7c2640d426f7b97ca2d5e9161d3f0a00f21abf
     // base_latch_wait_cycles passed as parameter to hub75_row program
@@ -902,7 +919,7 @@ static void setup_dma_transfers()
                           &pixel_chan_config,
                           &pio_config.data_pio->txf[pio_config.sm_data],
                           dma_buffer,
-                          dma_encode_transfer_count((TOTAL_PIXELS >> 1) * bcm_sequence_length),
+                          dma_encode_transfer_count((hub75_pixels >> 1) * bcm_sequence_length),
                           false);
 
     // pixel ctrl channel
@@ -1321,21 +1338,59 @@ __attribute__((optimize("unroll-loops"))) void update(
  *
  * @param src Graphics object to be updated - RGB888 format, 24-bits in uint32_t array
  */
+// One clock carries a pixel and the pixel 32 rows below it on the same panel.
+// From the front, the Pico's panel is the right one. Two panels are that row,
+// cable running left. Four panels continue up and then right, so the top row
+// is clocked from the far end and each of those panels is filled right to left.
+static void gather_live_bgr(const uint8_t *src)
+{
+    int index = 0;
+    const int clocks = (int)hub75_stream;
+    for (int row = 0; row < 32; ++row)
+    {
+        for (int clock = 0; clock < clocks; ++clock)
+        {
+            int x = clock;
+            int y = row;
+            if (hub75_height == 128)
+            {
+                int band = clock >> 6;
+                int i = clock & 63;
+                int local = row;
+                if (band == 0)
+                {
+                    x = 127 - i;
+                    y = local;
+                }
+                else if (band == 1)
+                {
+                    x = 63 - i;
+                    y = local;
+                }
+                else if (band == 2)
+                {
+                    x = i;
+                    y = 64 + local;
+                }
+                else
+                {
+                    x = 64 + i;
+                    y = 64 + local;
+                }
+            }
+            const uint8_t *upper = src + (y * hub75_width + x) * 3;
+            const uint8_t *lower = src + ((y + 32) * hub75_width + x) * 3;
+            rgb_buffer[index++] = LUT_MAPPING_RGB(upper[2], upper[1], upper[0]);
+            rgb_buffer[index++] = LUT_MAPPING_RGB(lower[2], lower[1], lower[0]);
+        }
+    }
+}
+
 __attribute__((optimize("unroll-loops"))) void update_bgr(const uint8_t *src)
 {
 #if defined(HUB75) || defined(HUB75_SM5368_ABC)
 #if CHAIN_COLS == 1 && CHAIN_ROWS == 1
-    constexpr int32_t triple_stride_to_paired_row = 3 * PanelConfig::stride_to_paired_row;
-
-    int32_t fb_index = 0;
-    for (int32_t j = 0; j < triple_stride_to_paired_row; j += 3)
-    {
-        for (int p = 0; p < PanelConfig::ROWS_IN_PARALLEL; ++p)
-        {
-            const int32_t offset = p * triple_stride_to_paired_row;
-            rgb_buffer[fb_index++] = LUT_MAPPING_RGB(src[offset + j + 2], src[offset + j + 1], src[offset + j]);
-        }
-    }
+    gather_live_bgr(src);
 #else
     // U-Type Serpentine Chaining
     // Example:

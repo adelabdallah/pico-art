@@ -99,11 +99,11 @@ void settings_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     clear_frame(frame);
     float seconds = anim_ms * 0.001f;
     float turns = (anim_ms % GEAR_HUE_MS) / (float)GEAR_HUE_MS;
-    float bob = sinf(seconds * 2.1f) * 2.0f;
+    float bob = panel_s(sinf(seconds * 2.1f) * 2.0f);
     Gear gears[3] = {
-        {32.0f, 27.0f + bob, 13.0f, 8, seconds * 0.8f},
-        {20.0f, 42.0f - bob, 11.0f, 6, -seconds * 1.05f},
-        {44.0f, 42.0f - bob * 0.7f, 11.0f, 6, -seconds * 0.95f},
+        {panel_sx(32.0f), panel_sy(27.0f) + bob, panel_s(13.0f), 8, seconds * 0.8f},
+        {panel_sx(20.0f), panel_sy(42.0f) - bob, panel_s(11.0f), 6, -seconds * 1.05f},
+        {panel_sx(44.0f), panel_sy(42.0f) - bob * 0.7f, panel_s(11.0f), 6, -seconds * 0.95f},
     };
     for (int i = 0; i < 3; ++i) {
         stamp_gear(frame, gears[i], turns);

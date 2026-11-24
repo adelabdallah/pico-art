@@ -35,7 +35,7 @@
 #include <cmath>
 #include <cstdint>
 
-constexpr int REST_COUNT = (PANEL_PIXELS * 40) / 100;
+static int rest_count() { return (PANEL_PIXELS * 40) / 100; }
 constexpr int SPLASH_MAX = 820;
 constexpr float PI = 3.14159265f;
 constexpr int PIN_MIC = 27;
@@ -296,7 +296,7 @@ static void listen_audio(uint32_t now) {
 }
 
 static int pool_count() {
-    int count = REST_COUNT + (int)splash;
+    int count = rest_count() + (int)splash;
     if (count < 1) {
         count = 1;
     }
@@ -414,19 +414,20 @@ static void paint(uint8_t *frame) {
     float pour = smooth_unit(0.04f, 0.26f, mag * imu_gain());
     float radius = sqrtf(count / PI);
     float line = waterline(shore_x, shore_y, count);
-    float mid = (PANEL_WIDTH - 1) * 0.5f;
+    float mid_x = panel_cx();
+    float mid_y = panel_cy();
     float presence = 0.7f + 0.85f * caustic_drive();
     for (int i = 0; i < PANEL_PIXELS * 3; ++i) {
         frame[i] = 0;
     }
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
-        float from_mid_y = y - mid;
+        float from_mid_y = y - mid_y;
         float row = y * shore_y;
         float wy = y * CAUSTIC_SCALE;
         float w1 = sinf(wy * 1.3f + caustic_time * 0.9f) * 0.35f;
         float wy_fine = wy * 1.3f;
         for (int x = 0; x < PANEL_WIDTH; ++x) {
-            float from_mid_x = x - mid;
+            float from_mid_x = x - mid_x;
             float circle = radius - sqrtf(from_mid_x * from_mid_x + from_mid_y * from_mid_y);
             float shore = row + x * shore_x - line;
             float depth = circle + (shore - circle) * pour;
@@ -457,7 +458,7 @@ static void paint(uint8_t *frame) {
             if (on_wall && depth > 0.0f) {
                 shine += 0.35f;
             }
-            float near = 1.0f - fabsf(x - glint_x) / 8.0f;
+            float near = 1.0f - fabsf(x - glint_x) / panel_s(8.0f);
             if (near < 0.0f) {
                 near = 0.0f;
             }

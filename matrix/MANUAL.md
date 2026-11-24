@@ -1,6 +1,6 @@
 # Xyloscope
 
-The xyloscope is a Pico 2W, a 64 by 64 panel, five buttons, an encoder, a two-colour OLED, a tilt sensor, and a microphone. The coloured buttons read like a xylophone, and the panel is the picture.
+The xyloscope is a Pico 2W, one or more 64 by 64 panels, five buttons, an encoder, a two-colour OLED, a tilt sensor, and a microphone. The coloured buttons read like a xylophone, and the panels are the picture.
 
 This file follows the firmware in this directory. When a pin, a pattern, or a button action changes, update the matching section and the pin diagram.
 
@@ -9,10 +9,10 @@ This file follows the firmware in this directory. When a pin, a pattern, or a bu
 | Part | Role | Connection |
 | --- | --- | --- |
 | Raspberry Pi Pico 2W | Controller. The firmware is built for `pico2_w` and copied to the RP2350 drive. | USB for power and flashing. |
-| Waveshare P2.5 64×64 HUB75 panel | The picture. Wired the way the Waveshare Pico example is wired. | Colour on GP0 through GP5. Row address A through E on GP6 through GP10. Clock GP11, latch GP12, output enable GP13. Share ground with the Pico. Feed the panel 5 V from the supply below. |
+| Waveshare P2.5 64×64 HUB75 panel | The picture. Wired the way the Waveshare Pico example is wired. Four of these, powered as two pairs. | Colour on GP0 through GP5. Row address A through E on GP6 through GP10. Clock GP11, latch GP12, output enable GP13. Share ground with the Pico. Feed each pair 5 V from the supply below. |
 | Bergen Industries PS915143 cord | Wall lead for the 5 V supply. 9 foot, 14 AWG, three wires. NEMA 5-15 plug and a pigtail. 15 A at 125 V AC, 1875 W. | Plug in the wall. The pigtail is the AC side of the supply, with the rocker in that feed. https://www.amazon.ca/dp/B07BQ8PY21 |
-| Velainwom 5 V 30 A switching supply | The panel's 5 V supply. 150 W, AC 110/220 V in, DC 5 V out. | AC comes from the cord above, through the rocker. +V to the panel 5 V. −V to the shared ground. https://www.amazon.ca/dp/B07PRY73TN |
-| DaierTek SPST rocker | On-off for the whole setup, including a later build of up to four panels. Waterproof toggle with a red safety cover. 20 A at 125 V AC, 15 A at 250 V AC. Two pins, in the AC feed of the 5 V supply. | https://www.amazon.ca/dp/B07T6YNRZS |
+| Velainwom 5 V 30 A switching supply | The panels' 5 V supply. 150 W, AC 110/220 V in, DC 5 V out. | AC comes from the cord above, through the rocker. Four panels, powered as two pairs. Each pair's 5 V leads share one fork on +V, and that pair's grounds share one fork on −V. https://www.amazon.ca/dp/B07PRY73TN |
+| DaierTek SPST rocker | On-off for the supply that feeds both panel pairs. Waterproof toggle with a red safety cover. 20 A at 125 V AC, 15 A at 250 V AC. Two pins, in the AC feed of the 5 V supply. | https://www.amazon.ca/dp/B07T6YNRZS |
 | FainWan MT3608 step-up modules | 12 V for the button LEDs. A pack of five. Each takes 2 V to 24 V in and can raise it as high as 28 V, at up to 2 A. Set the output to 12 V from the panel 5 V supply. | https://www.amazon.ca/dp/B09LM83XBF |
 | 128×64 SSD1306 OLED | Names the pattern and the open setting. The top 16 rows are the yellow band. The lower rows are blue. | I2C1, GP14 SDA, GP15 SCL, address `0x3C`. |
 | MPU-6050 | Tilt. Liquid pours with it. Galaxy tilts its disk with it. Solar looks around the orrery and around each world with it. | Same I2C bus as the OLED, address `0x68`. |
@@ -52,7 +52,19 @@ USB is at the top. The left column runs down the left header, and the right colu
     SCL OLED+MPU  GP15 |        |  GP16  encoder A
 ```
 
-The panel shares any GND pin. Its 5 V comes from the Velainwom supply. The OLED and the MPU-6050 share GP14 and GP15.
+Four panels are powered as two pairs. Each pair takes one +V and one −V from the Velainwom supply. That pair's 5 V leads are joined to one fork, and its grounds are joined to the other. Both pairs can be on together. The Pico shares any GND pin with the supply's −V. While the pairs are still on separate HUB75 chains, each pair has its own Pico 2W, and both share that ground. The OLED and the MPU-6050 share GP14 and GP15.
+
+## Panels
+
+The panel count is a stored setting. The choices are 1, 2, and 4. A new board, and any board whose saved settings are older than this setting, boots as 1. Changing it saves at once and takes effect on the next boot. The scan locks the chain length when it starts, so the picture stays wrong until that reboot. The OLED and the encoder still work while the picture is wrong, which is how the count gets changed.
+
+One panel is 64 by 64. Two panels are 128 wide by 64 tall. From the front, the Pico's panel is the right one and the HUB75 cable runs left. Four panels are 128 by 128. From the front, the Pico's panel is the bottom right. The cable runs left, then up, then right. Every panel stays upright, with the same edge up.
+
+```text
+[ top left ] --> [ top right ]
+      ^
+[ bottom left ] <-- [ bottom right / Pico ]
+```
 
 A hold is about a third of a second.
 
@@ -60,7 +72,7 @@ Any button, the encoder click, and a turn of the encoder wake the panel and the 
 
 ## What is remembered
 
-The last flash sector stores the pattern, the panel brightness, the hue, the microphone sensitivity, the tilt sensitivity, the OLED contrast, both timers, the encoder sensitivity, and the double-click window.
+The last flash sector stores the pattern, the panel brightness, the hue, the microphone sensitivity, the tilt sensitivity, the OLED contrast, both timers, the encoder sensitivity, the double-click window, and the panel count.
 
 Pause, each pattern's turn, each pattern's sideways slide, each pattern's mirrors, and the pattern a double click leaves behind last until power-off. They clear on reboot. Hue is one of the stored settings, so it comes back.
 
@@ -70,9 +82,9 @@ The panel timer choices are 1, 2, 5, 10, 15, 30, and 60 minutes, then a forever 
 
 Boot plays an intro, then fades in the saved pattern. With a blank memory that pattern is plasma.
 
-A glass phrase fills over 3 seconds and sways a little. The liquid inside shifts through a rainbow, one turn about every 0.7 seconds. Each boot picks one phrase at random: BOOTING, LOADING, PAINTING, NOW IN 3D!, BEEP BOOP, or WOWZA. NOW IN 3D! is two lines, with 3D! larger and underneath. BEEP BOOP is two lines of the same size. A phrase wider than the panel shrinks until the whole word fits across the width. A taller word can still run off the top and bottom. On a wider panel the same words stay at full size. The word then flickers, slowly and then quickly, and fades over 1 second. A starfield shows through that flicker. The stars speed up over 1 second, rush into the centre, and fade to black over 1 second.
+A glass phrase fills over 3 seconds and sways a little. The liquid inside shifts through a rainbow, one turn about every 0.7 seconds. Each boot picks one phrase at random: BOOTING, LOADING, PAINTING, NOW IN 3D!, BEEP BOOP, or WOWZA. NOW IN 3D! is two lines, with 3D! larger and underneath. BEEP BOOP is two lines of the same size. A phrase shrinks until the whole word fits on the panel. The word then flickers, slowly and then quickly, and fades over 1 second. A starfield shows through that flicker. The stars speed up over 1 second, rush into the centre, and fade to black over 1 second.
 
-XYLO slides in from the left across the top half. SCOPE grows out of the centre and lands on the lower half. Both have landed after about 1.2 seconds. The letters are 28 pixels tall and fill the middle of the panel, one pixel clear of the border. XYLO is blocky, with straight edges. SCOPE has rounded edges. Both words are the same height. XYLO is red, yellow, green, then blue. SCOPE is chrome. A rainbow of seven colours chases the border for 2 seconds. The border is one pixel wide, and both words fill while the rainbow runs. A small pop follows, and a gold shine sweeps the whole panel from the top left to the bottom right. The rainbow border then locks and holds. The letters fly toward the camera in about a third of a second, and the saved pattern fades in over 2 seconds.
+XYLO slides in from the left. SCOPE grows out of the centre. The two words sit one above the other in the middle of the panel. Both have landed after about 1.2 seconds. The letters are 28 pixels tall and sit in the middle of the panel. On one panel they stay one pixel clear of the border. XYLO is blocky, with straight edges. SCOPE has rounded edges. Both words are the same height. XYLO is red, yellow, green, then blue. SCOPE is chrome. A rainbow of seven colours chases the border for 2 seconds. The border is one pixel wide, and both words fill while the rainbow runs. A small pop follows, and a gold shine sweeps the whole panel from the top left to the bottom right. The rainbow border then locks and holds. The letters fly toward the camera in about a third of a second, and the saved pattern fades in over 2 seconds.
 
 Red skips the intro at any moment, including the fade. The saved pattern appears on the next frame, already running. After the intro, red pauses the picture again. The other buttons and the encoder wait until the intro ends. The OLED yellow band reads XYLOSCOPE for the whole intro.
 
@@ -103,25 +115,24 @@ Plasma is 1. Settings, INTRO, and the reset prompts have no number. The yellow b
 | 2 | warp | Soft blobs from value noise, sampled in a warped place. |
 | 3 | feedback | Each frame samples the previous frame closer to the centre, turns it, and adds a soft spot. The picture smears into a tunnel. |
 | 4 | metaballs | Moving balls added into one field. They merge where they meet. |
-| 5 | reaction | Gray-Scott reaction-diffusion. Two chemicals grow into coral, spots, and worms. A dead field is seeded again. |
-| 6 | life | Conway's Life on the whole panel. Colour is how long a cell has lived. A fresh board starts when the population stalls, or every 45 seconds. |
-| 7 | flow field | Particles trace a slowly turning noise field. Colour follows the direction they travel. |
-| 8 | voronoi cells | Fourteen drifting seeds and the regions they claim, shaded like stained glass. |
-| 9 | loop | Langton's loop. A generation that changes nothing plants the loop at a new spot. |
-| 10 | liquid | A square cup seen from above. Tilt pours a pool against the low walls and slides a web of light toward the low side. Sound spreads the pool, tints it, places a glint, and bends that web into a ring. |
-| 11 | pipes | Perspective pipes in a box. Each pipe is a shaded cylinder. The box clears when it fills. |
-| 12 | reef | Coral, rock, and open water, with fish and larger animals. Sunbeams stop when they meet rock. |
-| 13 | solar | An orrery on the wide view, and a close portrait of each world. The stops run from the wide view through the sun, the planets, the belt, and Pluto, then back. |
-| 14 | campfire | A campfire under a milky way, with a tent, a pine line, and sparks. |
-| 15 | skyline | A neon harbour wider than the panel. The view is a 64 by 64 window on a 192 by 108 picture, and it stops at the edges. |
-| 16 | lighthouse | A lighthouse on the rocks in a storm, its beam sweeping through the rain. |
-| 17 | ferris wheel | A lit wheel turning at dusk, with gondolas that stay upright. |
-| 18 | aurora | Three curtains, green, teal, and rose, swaying over a dark hill. |
-| 19 | fireworks | Rockets climb over a night skyline and burst into coloured shells. Shells also launch on their own. |
-| 20 | galaxy | A tilted spiral, warm at the core and blue along two arms. The solar system sits on the outer tip of one arm. |
+| 5 | life | Conway's Life on the whole panel. Colour is how long a cell has lived. A fresh board starts when the population stalls, or every 45 seconds. |
+| 6 | flow field | Particles trace a slowly turning noise field. Colour follows the direction they travel. |
+| 7 | voronoi cells | Fourteen drifting seeds and the regions they claim, shaded like stained glass. |
+| 8 | loop | Langton's loop. A generation that changes nothing plants the loop at a new spot. |
+| 9 | liquid | A square cup seen from above. Tilt pours a pool against the low walls and slides a web of light toward the low side. Sound spreads the pool, tints it, places a glint, and bends that web into a ring. |
+| 10 | pipes | Perspective pipes in a box. Each pipe is a shaded cylinder. The box clears when it fills. |
+| 11 | reef | Coral, rock, and open water, with fish and larger animals. Sunbeams stop when they meet rock. |
+| 12 | solar | An orrery on the wide view, and a close portrait of each world. The stops run from the wide view through the sun, the planets, the belt, and Pluto, then back. |
+| 13 | campfire | A campfire under a milky way, with a tent, a pine line, and sparks. |
+| 14 | skyline | A neon harbour on a 192 by 108 picture. The view is a window the size of the panels, and it stops at the edges. A taller chain shows the whole height and leaves the extra rows dark. |
+| 15 | lighthouse | A lighthouse on the rocks in a storm, its beam sweeping through the rain. |
+| 16 | ferris wheel | A lit wheel turning at dusk, with gondolas that stay upright. |
+| 17 | aurora | Three curtains, green, teal, and rose, swaying over a dark hill. |
+| 18 | fireworks | Rockets climb over a night skyline and burst into coloured shells. Shells also launch on their own. |
+| 19 | galaxy | A tilted spiral, warm at the core and blue along two arms. The solar system sits on the outer tip of one arm. |
 |  | settings | Three gears. Blue picks a stored value and the encoder raises or lowers it. |
 
-Plasma, warp, feedback, metaballs, reaction, life, flow field, voronoi cells, loop, pipes, reef, and aurora use the shared controls only.
+Plasma, warp, feedback, metaballs, life, flow field, voronoi cells, loop, pipes, reef, and aurora use the shared controls only.
 
 ## Controls by pattern
 
@@ -197,5 +208,8 @@ The values, in order:
 | Double click | 200 to 800 milliseconds, in steps of 50 | 400 milliseconds |
 | Panel timer | 1, 2, 5, 10, 15, 30, 60 minutes, or forever | Forever |
 | OLED timer | 1, 2, 5, 10, 15, 30, or 60 minutes | 2 minutes |
+| Panels | 1, 2, or 4 | 1 |
+
+Panels is the chain length. 1 is one 64 by 64 panel. 2 is a 128 by 64 pair, Pico on the right, cable running left. 4 is a 128 by 128 square, Pico on the bottom right, cable left, then up, then right. The new count is stored when the encoder changes it, and the picture uses it on the next boot.
 
 The sideways fling uses each detent on its own. Encoder sensitivity does not slow that fling.

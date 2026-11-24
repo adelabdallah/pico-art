@@ -87,8 +87,6 @@
 constexpr int FRAME_MS = 40;
 constexpr int FLIGHT_MS = 2000;
 constexpr float CLOSE_SCALE = 18.0f;
-constexpr float PANEL_CX = (PANEL_WIDTH - 1) * 0.5f;
-constexpr float PANEL_CY = (PANEL_HEIGHT - 1) * 0.5f;
 constexpr int DT_CAP_MS = 200;
 constexpr int HOLD_MS = 320;
 constexpr int MIRROR_LINE_CAP = 5;
@@ -129,7 +127,9 @@ constexpr int OLED_TIMER_DEFAULT = 1;
 constexpr float LINE_TURN_PER_MS = 6.2831853f / 8000.0f;
 constexpr float CIRCLE_GROW_MS = 4000.0f;
 constexpr float CIRCLE_AREA_CAP = 0.40f;
-constexpr int SETTING_COUNT = 8;
+constexpr int SETTING_COUNT = 9;
+constexpr int PANEL_CHOICES[] = {1, 2, 4};
+constexpr int PANEL_CHOICE_COUNT = 3;
 constexpr int OLED_BRIGHT_MIN = 5;
 constexpr int ENC_CHOICES[] = {1, 2, 4, 8};
 constexpr int ENC_CHOICE_COUNT = 4;
@@ -159,8 +159,6 @@ constexpr int8_t ENC_TABLE[16] = {
     0, 1, -1, 0,
 };
 
-static_assert(DISPLAY_WIDTH == PANEL_WIDTH, "panel width is 64");
-static_assert(DISPLAY_HEIGHT == PANEL_HEIGHT, "panel height is 64");
 
 // start and draw hold the functions themselves, the way a Python name can refer to a function.
 struct Pattern {
@@ -174,7 +172,6 @@ Pattern patterns[] = {
     {"warp", warp_start, warp_draw},
     {"feedback", feedback_start, feedback_draw},
     {"metaballs", metaballs_start, metaballs_draw},
-    {"reaction", reaction_start, reaction_draw},
     {"life", life_start, life_draw},
     {"flow field", flow_start, flow_draw},
     {"voronoi cells", voronoi_start, voronoi_draw},
@@ -201,7 +198,8 @@ constexpr uint32_t PATTERN_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 
 // version 0 is a record from before the settings page. Those boots keep pattern, brightness, and hue.
 // Version 5 predates the double-click window. Those boots keep the default window.
-constexpr uint32_t PATTERN_VERSION = 6;
+// Version 6 predates the panel count, and it still lists reaction at index 4.
+constexpr uint32_t PATTERN_VERSION = 7;
 
 struct SavedPattern {
     uint32_t magic;
@@ -216,6 +214,7 @@ struct SavedPattern {
     uint32_t oled_timer;
     uint32_t enc_sens;
     uint32_t dbl_ms;
+    uint32_t panels;
 };
 
 struct Settings {
@@ -230,6 +229,7 @@ struct Settings {
     int enc;
     int dbl_ms;
     int cursor;
+    int panels;
 };
 
 enum class ButtonRole {
@@ -281,9 +281,10 @@ static SettingRow setting_rows[] = {
     {"DBL CLICK:", OledIcon::Knob},
     {"LED TIMER:", OledIcon::Hourglass},
     {"OLED TIMER:", OledIcon::Hourglass},
+    {"PANELS:", OledIcon::Axes},
 };
 
-static Settings settings = {0, BRIGHTNESS_PERCENT, 0.0f, 50, 50, 100, LED_TIMER_DEFAULT, OLED_TIMER_DEFAULT, 1, DBL_DEFAULT_MS, 0};
+static Settings settings = {0, BRIGHTNESS_PERCENT, 0.0f, 50, 50, 100, LED_TIMER_DEFAULT, OLED_TIMER_DEFAULT, 1, DBL_DEFAULT_MS, 0, 1};
 static uint32_t anim_ms = 0;
 static float anim_frac = 0.0f;
 static bool matrix_blank = false;
@@ -389,24 +390,26 @@ static Settings load_settings() {
     if (saved->magic != PATTERN_MAGIC) {
         return loaded;
     }
-    if (saved->index < (uint32_t)PATTERN_COUNT) {
-        loaded.pattern = (int)saved->index;
-    }
-    // Version 2 saved the settings pattern at index 13. That pattern is the last entry now.
+    // Older lists are rewritten onto the reaction-era order, then reaction is removed.
+    // Version 2 saved settings at 13. Ant was 6 and rule 30 was 8, and both open life.
+    // Loop was 7. Versions 3 and 4 kept wireframe at 19, galaxy at 20, and settings at 21.
+    int era = -1;
     if (saved->version == 2 && saved->index == 13) {
-        loaded.pattern = PATTERN_COUNT - 1;
-    } else if (saved->version == 2 || saved->version == 3) {
-        // Ant was index 6 and rule 30 was index 8. Loop was index 7 and is index 8 now.
-        if (saved->index == 6 || saved->index == 8) {
-            loaded.pattern = 5;
-        } else         if (saved->index == 7) {
-            loaded.pattern = 8;
-        }
+        era = 20;
+    } else if ((saved->version == 2 || saved->version == 3) && (saved->index == 6 || saved->index == 8)) {
+        era = 5;
+    } else if ((saved->version == 2 || saved->version == 3) && saved->index == 7) {
+        era = 8;
+    } else if ((saved->version == 3 || saved->version == 4) && saved->index > 19) {
+        era = (int)saved->index - 1;
+    } else {
+        era = (int)saved->index;
     }
-    // Versions 3 and 4 kept wireframe at index 19, galaxy at 20, and settings at 21.
-    // Wireframe opens galaxy. Galaxy and settings each move down by one.
-    if ((saved->version == 3 || saved->version == 4) && saved->index > 19) {
-        loaded.pattern = (int)saved->index - 1;
+    if (saved->version < 7 && era > 4) {
+        era -= 1;
+    }
+    if (era >= 0 && era < PATTERN_COUNT) {
+        loaded.pattern = era;
     }
     // Stored as percent + 1. Zero is a record from before brightness was saved.
     if (saved->brightness >= 1 && saved->brightness <= 101) {
@@ -423,7 +426,7 @@ static Settings load_settings() {
     if (saved->version == 0) {
         return loaded;
     }
-    if (saved->version != 1 && saved->version != 2 && saved->version != 3 && saved->version != 4 && saved->version != 5 && saved->version != PATTERN_VERSION) {
+    if (saved->version < 1 || saved->version > PATTERN_VERSION) {
         return loaded;
     }
     if (saved->mic_sens <= 100 && saved->mic_sens % BRIGHTNESS_STEP == 0) {
@@ -454,6 +457,9 @@ static Settings load_settings() {
             loaded.dbl_ms = window;
         }
     }
+    if (saved->version >= 7 && (saved->panels == 1 || saved->panels == 2 || saved->panels == 4)) {
+        loaded.panels = (int)saved->panels;
+    }
     return loaded;
 }
 
@@ -481,6 +487,7 @@ static void program_settings(void *param) {
     saved->oled_timer = (uint32_t)incoming->oled_timer;
     saved->enc_sens = (uint32_t)incoming->enc;
     saved->dbl_ms = (uint32_t)incoming->dbl_ms;
+    saved->panels = (uint32_t)incoming->panels;
     flash_range_erase(PATTERN_OFFSET, FLASH_SECTOR_SIZE);
     flash_range_program(PATTERN_OFFSET, page, FLASH_PAGE_SIZE);
 }
@@ -713,9 +720,18 @@ static void present_oled(uint32_t now) {
         } else if (cursor == 6) {
             format_timer(value, (int)sizeof value, LED_MINUTES[settings.led_timer]);
             bar = (settings.led_timer + 1) / (float)LED_TIMER_COUNT;
-        } else {
+        } else if (cursor == 7) {
             format_timer(value, (int)sizeof value, OLED_MINUTES[settings.oled_timer]);
             bar = (settings.oled_timer + 1) / (float)OLED_TIMER_COUNT;
+        } else {
+            snprintf(value, sizeof value, "%d", settings.panels);
+            int choice = 0;
+            for (int i = 0; i < PANEL_CHOICE_COUNT; ++i) {
+                if (PANEL_CHOICES[i] == settings.panels) {
+                    choice = i;
+                }
+            }
+            bar = (choice + 1) / (float)PANEL_CHOICE_COUNT;
         }
         oled_show_setting(setting_rows[cursor].label, setting_rows[cursor].icon, value, bar, now, selecting);
         return;
@@ -801,6 +817,7 @@ static void commit_pattern(int index) {
     anim_ms = 0;
     anim_frac = 0.0f;
     reset_play();
+    pattern_reset();
     patterns[settings.pattern].start();
     if (on_campfire()) {
         view_angle = 0.0f;
@@ -893,13 +910,25 @@ static bool nudge_setting(int direction, bool store) {
             return false;
         }
         settings.led_timer = next;
-    } else {
+    } else if (cursor == 7) {
         int next = settings.oled_timer + direction;
         if (next < 0 || next >= OLED_TIMER_COUNT) {
             return false;
         }
         settings.oled_timer = next;
         apply_oled_timer();
+    } else {
+        int choice = 0;
+        for (int i = 0; i < PANEL_CHOICE_COUNT; ++i) {
+            if (PANEL_CHOICES[i] == settings.panels) {
+                choice = i;
+            }
+        }
+        int next = choice + direction;
+        if (next < 0 || next >= PANEL_CHOICE_COUNT) {
+            return false;
+        }
+        settings.panels = PANEL_CHOICES[next];
     }
     if (store) {
         save_settings(settings);
@@ -957,7 +986,7 @@ static void apply_hue(uint8_t *pixels, float turns) {
     }
 }
 
-static uint8_t turned[PANEL_PIXELS * 3];
+static uint8_t *turned = nullptr;
 
 static void copy_pixel(uint8_t *dst, const uint8_t *src) {
     dst[0] = src[0];
@@ -1001,7 +1030,7 @@ static void rotate_exact(uint8_t *pixels, int quarter) {
             copy_pixel(turned + (y * PANEL_WIDTH + x) * 3, pixel_at(pixels, sx, sy));
         }
     }
-    std::memcpy(pixels, turned, sizeof turned);
+    std::memcpy(pixels, turned, (size_t)PANEL_PIXELS * 3);
 }
 
 constexpr float SEAM = 8.0f;
@@ -1113,26 +1142,27 @@ static void rotate_view(uint8_t *pixels) {
     if (error < 0.0f) {
         error = -error;
     }
-    if (gap < 0.02f && error < 0.02f) {
+    if (gap < 0.02f && error < 0.02f && PANEL_WIDTH == PANEL_HEIGHT) {
         rotate_exact(pixels, nearest);
         return;
     }
     float cosine = cosf(view_angle);
     float sine = sinf(view_angle);
-    float mid = (PANEL_WIDTH - 1) * 0.5f;
+    float mx = panel_cx();
+    float my = panel_cy();
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
         for (int x = 0; x < PANEL_WIDTH; ++x) {
-            float dx = x - mid;
-            float dy = y - mid;
-            float sx = mid + dx * cosine + dy * sine;
-            float sy = mid - dx * sine + dy * cosine;
+            float dx = x - mx;
+            float dy = y - my;
+            float sx = mx + dx * cosine + dy * sine;
+            float sy = my - dx * sine + dy * cosine;
             sample_plane(pixels, sx, sy, turned + (y * PANEL_WIDTH + x) * 3, true, true);
         }
     }
-    std::memcpy(pixels, turned, sizeof turned);
+    std::memcpy(pixels, turned, (size_t)PANEL_PIXELS * 3);
 }
 
-static uint8_t burst_snap[PANEL_PIXELS * 3];
+static uint8_t *burst_snap = nullptr;
 
 static float pulse_gain(uint32_t now) {
     float wave = 0.5f + 0.5f * sinf(now * 6.2831853f / 3000.0f);
@@ -1168,7 +1198,7 @@ static void paint_fall(uint8_t *pixels, int drop) {
 }
 
 static void begin_burst(uint8_t *pixels, uint32_t now) {
-    std::memcpy(burst_snap, pixels, sizeof burst_snap);
+    std::memcpy(burst_snap, pixels, (size_t)PANEL_PIXELS * 3);
     burst = BurstPhase::Fall;
     burst_at = now;
     play_speed = 1.0f;
@@ -1187,7 +1217,7 @@ static void present_frame(uint8_t *pixels, uint32_t now) {
             burst_at = now;
         } else {
             if (portion < 0.12f) {
-                std::memcpy(pixels, burst_snap, sizeof burst_snap);
+                std::memcpy(pixels, burst_snap, (size_t)PANEL_PIXELS * 3);
                 apply_gain(pixels, 1.15f);
                 return;
             }
@@ -1223,7 +1253,7 @@ static void translate_view(uint8_t *pixels) {
             sample_plane(pixels, x - shift_x, (float)y, turned + (y * PANEL_WIDTH + x) * 3, true, false);
         }
     }
-    std::memcpy(pixels, turned, sizeof turned);
+    std::memcpy(pixels, turned, (size_t)PANEL_PIXELS * 3);
 }
 
 static uint32_t mirror_next() {
@@ -1250,12 +1280,11 @@ static float mirror_range(float low, float high) {
 }
 
 static float line_centre_distance(float ax, float ay, float dx, float dy) {
-    float mid = (PANEL_WIDTH - 1) * 0.5f;
     float len = sqrtf(dx * dx + dy * dy);
     if (len < 1.0f) {
         return 0.0f;
     }
-    float cross = dx * (mid - ay) - dy * (mid - ax);
+    float cross = dx * (panel_cy() - ay) - dy * (panel_cx() - ax);
     if (cross < 0.0f) {
         cross = -cross;
     }
@@ -1345,21 +1374,22 @@ static void fit_circle(MirrorCircle &circle) {
     circle.cx = circle.home_x;
     circle.cy = circle.home_y;
     float lo = circle.radius;
-    float hi = (float)(PANEL_WIDTH - 1) - circle.radius;
-    if (hi < lo) {
+    float hi_x = (float)(PANEL_WIDTH - 1) - circle.radius;
+    float hi_y = (float)(PANEL_HEIGHT - 1) - circle.radius;
+    if (hi_x < lo || hi_y < lo) {
         circle.cx = (PANEL_WIDTH - 1) * 0.5f;
         circle.cy = (PANEL_HEIGHT - 1) * 0.5f;
         return;
     }
     if (circle.cx < lo) {
         circle.cx = lo;
-    } else if (circle.cx > hi) {
-        circle.cx = hi;
+    } else if (circle.cx > hi_x) {
+        circle.cx = hi_x;
     }
     if (circle.cy < lo) {
         circle.cy = lo;
-    } else if (circle.cy > hi) {
-        circle.cy = hi;
+    } else if (circle.cy > hi_y) {
+        circle.cy = hi_y;
     }
 }
 
@@ -1371,10 +1401,11 @@ static int add_circle_mirror() {
     }
     float fraction = mirror_range(MIRROR_AREA_MIN, MIRROR_AREA_MAX);
     float radius = sqrtf(fraction * (float)PANEL_PIXELS / 3.14159265f);
-    float far = (PANEL_WIDTH - 1) - radius;
+    float far_x = (PANEL_WIDTH - 1) - radius;
+    float far_y = (PANEL_HEIGHT - 1) - radius;
     MirrorCircle circle = {};
-    circle.home_x = mirror_range(radius, far);
-    circle.home_y = mirror_range(radius, far);
+    circle.home_x = mirror_range(radius, far_x);
+    circle.home_y = mirror_range(radius, far_y);
     circle.radius = radius;
     fit_circle(circle);
     int index = set.circles;
@@ -1384,15 +1415,16 @@ static int add_circle_mirror() {
 }
 
 static void spin_line(MirrorLine &line, float angle) {
-    float mid = (PANEL_WIDTH - 1) * 0.5f;
+    float mx = panel_cx();
+    float my = panel_cy();
     float cosine = cosf(angle);
     float sine = sinf(angle);
     float bx = line.ax + line.dx;
     float by = line.ay + line.dy;
-    float ax = mid + (line.ax - mid) * cosine - (line.ay - mid) * sine;
-    float ay = mid + (line.ax - mid) * sine + (line.ay - mid) * cosine;
-    float nbx = mid + (bx - mid) * cosine - (by - mid) * sine;
-    float nby = mid + (bx - mid) * sine + (by - mid) * cosine;
+    float ax = mx + (line.ax - mx) * cosine - (line.ay - my) * sine;
+    float ay = my + (line.ax - mx) * sine + (line.ay - my) * cosine;
+    float nbx = mx + (bx - mx) * cosine - (by - my) * sine;
+    float nby = my + (bx - mx) * sine + (by - my) * cosine;
     line = make_line(ax, ay, nbx, nby);
 }
 
@@ -1499,7 +1531,7 @@ static void apply_mirrors(uint8_t *pixels) {
             sample_plane(pixels, sx, sy, turned + (y * PANEL_WIDTH + x) * 3, false, false);
         }
     }
-    std::memcpy(pixels, turned, sizeof turned);
+    std::memcpy(pixels, turned, (size_t)PANEL_PIXELS * 3);
 }
 
 static void enc_isr(uint gpio, uint32_t events) {
@@ -1983,14 +2015,14 @@ static void blend_channel(uint8_t &pixel, int sample, float alpha) {
 
 // One pullback. Ease 0 is the orrery filling the panel. Ease 1 is the galaxy, and the system sits on the arm.
 static void paint_cosmos(uint8_t *pixels, uint32_t now_ms) {
-    static uint8_t orrery[PANEL_PIXELS * 3];
+    uint8_t *orrery = panel_extra();
     float tip_x;
     float tip_y;
     galaxy_arm_tip(tip_x, tip_y);
     float ease = flight_ease(flight);
     float scale = expf(logf(CLOSE_SCALE) * (1.0f - ease));
-    float aim_x = PANEL_CX + (tip_x - PANEL_CX) * ease;
-    float aim_y = PANEL_CY + (tip_y - PANEL_CY) * ease;
+    float aim_x = panel_cx() + (tip_x - panel_cx()) * ease;
+    float aim_y = panel_cy() + (tip_y - panel_cy()) * ease;
     float orrery_scale = scale / CLOSE_SCALE;
     if (orrery_scale < 0.001f) {
         orrery_scale = 0.001f;
@@ -2021,8 +2053,8 @@ static void paint_cosmos(uint8_t *pixels, uint32_t now_ms) {
             if (alpha <= 0.0f) {
                 continue;
             }
-            float ox = PANEL_CX + dx * inv_orr;
-            float oy = PANEL_CY + dy * inv_orr;
+            float ox = panel_cx() + dx * inv_orr;
+            float oy = panel_cy() + dy * inv_orr;
             int ix = (int)floorf(ox - 0.5f);
             int iy = (int)floorf(oy - 0.5f);
             int blue = 0;
@@ -2042,13 +2074,19 @@ static void paint_cosmos(uint8_t *pixels, uint32_t now_ms) {
     }
 }
 
-static uint8_t frame[PANEL_PIXELS * 3];
+static uint8_t *frame = nullptr;
+
+static void bind_panel_memory() {
+    frame = panel_frame();
+    turned = panel_turned();
+    burst_snap = panel_extra();
+}
 
 // Core 1 only scans the panel. Core 0, in main, reads buttons and paints frames.
 static void core1_entry() {
     // Lets the panel core pause while the other core erases the pattern sector.
     flash_safe_execute_core_init();
-    create_hub75_driver(DISPLAY_WIDTH, DISPLAY_HEIGHT, PANEL_TYPE, INVERTED_STB);
+    create_hub75_driver((uint)PANEL_WIDTH, (uint)PANEL_HEIGHT, PANEL_TYPE, INVERTED_STB);
     start_hub75_driver();
     while (true) {
         tight_loop_contents();
@@ -2082,11 +2120,13 @@ int main() {
     set_sys_clock_khz(266000, true);
     stdio_init_all();
 
+    settings = load_settings();
+    panels_apply(settings.panels);
+    bind_panel_memory();
     multicore_reset_core1();
     multicore_launch_core1(core1_entry);
     // The driver on the other core allocates its scan buffers before brightness is set.
     sleep_ms(100);
-    settings = load_settings();
     setBasisBrightness(PANEL_BASIS);
     apply_matrix_level();
     environment_set_mic_sens(settings.mic);
@@ -2099,9 +2139,10 @@ int main() {
     apply_oled_timer();
     oled_set_contrast(settings.oled_bright);
 
+    pattern_reset();
     patterns[settings.pattern].start();
     intro_start();
-    printf("patterns: plasma, warp, feedback, metaballs, reaction, life, flow field, voronoi cells, loop, liquid, pipes, reef, solar, campfire, skyline, lighthouse, ferris wheel, aurora, fireworks, galaxy, settings\n");
+    printf("patterns: plasma, warp, feedback, metaballs, life, flow field, voronoi cells, loop, liquid, pipes, reef, solar, campfire, skyline, lighthouse, ferris wheel, aurora, fireworks, galaxy, settings\n");
     show_status();
 
     uint32_t oled_at = 0;
@@ -2175,15 +2216,28 @@ int main() {
             if (flight_dir != 0) {
                 solar_step(draw_dt);
                 galaxy_step(draw_dt);
-                paint_cosmos(frame, anim_ms);
+            }
+            // A falling burst keeps its snapshot in the turn buffer, so the turn waits.
+            // The frame that ends the fall rotates again, because that frame is already fading.
+            bool falling = false;
+            if (burst == BurstPhase::Fall) {
+                float portion = (float)(now - burst_at) / (float)BURST_FALL_MS;
+                falling = portion < 1.0f;
+            }
+            if (flight_dir != 0) {
+                if (!falling) {
+                    paint_cosmos(frame, anim_ms);
+                }
             } else {
                 patterns[settings.pattern].draw(frame, anim_ms, draw_dt);
             }
-            rotate_view(frame);
-            translate_view(frame);
-            if (!on_settings()) {
-                apply_mirrors(frame);
-                apply_hue(frame, settings.hue);
+            if (!falling) {
+                rotate_view(frame);
+                translate_view(frame);
+                if (!on_settings()) {
+                    apply_mirrors(frame);
+                    apply_hue(frame, settings.hue);
+                }
             }
             if (intro_fading()) {
                 apply_gain(frame, intro_gain());

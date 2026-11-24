@@ -277,7 +277,7 @@ static const Rgb colours[8] = {
 constexpr int SEED_HEIGHT = 10;
 constexpr int SEED_WIDTH = 14;
 
-static uint8_t grid[2][PANEL_PIXELS];
+static uint8_t *grid[2] = {nullptr, nullptr};
 static int shown = 0;
 static int pending_ms = 0;
 static uint32_t rng = 1;
@@ -366,6 +366,8 @@ static void paint_loop(uint8_t *pixels) {
 }
 
 void loop_start() {
+    grid[0] = pattern_alloc(PANEL_PIXELS);
+    grid[1] = pattern_alloc(PANEL_PIXELS);
     rng = time_us_32() | 1u;
     pending_ms = 0;
     place_seed();

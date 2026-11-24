@@ -17,8 +17,6 @@ constexpr float TAU = 6.2831853f;
 constexpr float BASE_SPIN = 0.12f;
 constexpr float RATE_FLOOR = 0.25f;
 constexpr float RATE_CAP = 8.0f;
-constexpr float CX = (PANEL_WIDTH - 1) * 0.5f;
-constexpr float CY = (PANEL_HEIGHT - 1) * 0.5f;
 // Outer point of one arm. The bright crest is where the angle matches the log spiral.
 constexpr float HOME_RAD = 26.0f;
 constexpr float ARM_K = 0.36f;
@@ -59,7 +57,7 @@ static void build_field() {
     }
     for (int i = 0; i < 100; ++i) {
         float rad = 3.0f + rnd() * 26.0f;
-        disk_rad[i] = rad;
+        disk_rad[i] = panel_s(rad);
         disk_arm[i] = (rnd() < 0.5f ? 0.0f : 3.14159265f) + logf(rad) / ARM_K + (rnd() - 0.5f) * 0.7f;
         disk_phase[i] = rnd() * TAU;
     }
@@ -70,11 +68,11 @@ static void shade(float px, float py, int &red, int &green, int &blue) {
     float tilt_s = sinf(tilt_angle);
     float spin_c = cosf(-spin_angle);
     float spin_s = sinf(-spin_angle);
-    float dx = px - CX;
-    float dy = py - CY;
+    float dx = px - panel_cx();
+    float dy = py - panel_cy();
     float u = dx * tilt_c + dy * tilt_s;
     float w = (-dx * tilt_s + dy * tilt_c) / tilt_squash;
-    float rad = sqrtf(u * u + w * w) + 0.001f;
+    float rad = sqrtf(u * u + w * w) / panel_s(1.0f) + 0.001f;
     float gu = u * spin_c - w * spin_s;
     float gw = u * spin_s + w * spin_c;
     float theta = atan2f(gw, gu);
@@ -110,16 +108,17 @@ static void shade(float px, float py, int &red, int &green, int &blue) {
 }
 
 static void home_screen(float &sx, float &sy) {
+    float home = panel_s(HOME_RAD);
     float theta = logf(HOME_RAD) / ARM_K;
-    float gu = cosf(theta) * HOME_RAD;
-    float gw = sinf(theta) * HOME_RAD;
+    float gu = cosf(theta) * home;
+    float gw = sinf(theta) * home;
     float u = gu * cosf(spin_angle) - gw * sinf(spin_angle);
     float w = gu * sinf(spin_angle) + gw * cosf(spin_angle);
     float flat = w * tilt_squash;
     float tilt_c = cosf(tilt_angle);
     float tilt_s = sinf(tilt_angle);
-    sx = CX + u * tilt_c - flat * tilt_s;
-    sy = CY + u * tilt_s + flat * tilt_c;
+    sx = panel_cx() + u * tilt_c - flat * tilt_s;
+    sy = panel_cy() + u * tilt_s + flat * tilt_c;
 }
 
 static void draw_system(uint8_t *frame, float aim_x, float aim_y) {
@@ -248,8 +247,8 @@ void galaxy_paint_at(uint8_t *frame, uint32_t anim_ms, float scale, float tip_x,
         float u = cosf(angle) * disk_rad[i];
         float w = sinf(angle) * disk_rad[i];
         float flat = w * tilt_squash;
-        float base_x = CX + u * tilt_c - flat * tilt_s;
-        float base_y = CY + u * tilt_s + flat * tilt_c;
+        float base_x = panel_cx() + u * tilt_c - flat * tilt_s;
+        float base_y = panel_cy() + u * tilt_s + flat * tilt_c;
         float sx = aim_x + (base_x - tip_x) * scale;
         float sy = aim_y + (base_y - tip_y) * scale;
         if (sinf(seconds * 2.0f + disk_phase[i]) > -0.2f) {

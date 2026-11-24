@@ -13,9 +13,60 @@
 // float &x lets a function write the caller's own variable.
 // An inline function in this header is compiled into each file that calls it.
 
-constexpr int PANEL_WIDTH = 64;
-constexpr int PANEL_HEIGHT = 64;
-constexpr int PANEL_PIXELS = PANEL_WIDTH * PANEL_HEIGHT;
+// Set at boot from the saved panel count. 1 is 64 by 64, 2 is 128 by 64, 4 is 128 by 128.
+extern int PANEL_WIDTH;
+extern int PANEL_HEIGHT;
+extern int PANEL_PIXELS;
+extern int PANEL_COUNT;
+
+constexpr int PANEL_WIDTH_MAX = 128;
+constexpr int PANEL_HEIGHT_MAX = 128;
+
+// The widest side a scene was drawn for, before the panel count grew.
+constexpr int PANEL_DESIGN = 64;
+
+inline float panel_cx() {
+    return (PANEL_WIDTH - 1) * 0.5f;
+}
+
+inline float panel_cy() {
+    return (PANEL_HEIGHT - 1) * 0.5f;
+}
+
+inline float panel_sx(float value) {
+    return value * (float)PANEL_WIDTH / (float)PANEL_DESIGN;
+}
+
+inline float panel_sy(float value) {
+    return value * (float)PANEL_HEIGHT / (float)PANEL_DESIGN;
+}
+
+// Same scale on both axes, taken from the shorter side, so a circle stays round.
+inline float panel_s(float value) {
+    float scale = (float)PANEL_WIDTH / (float)PANEL_DESIGN;
+    float tall = (float)PANEL_HEIGHT / (float)PANEL_DESIGN;
+    if (tall < scale) {
+        scale = tall;
+    }
+    return value * scale;
+}
+
+inline int panel_ix(int value) {
+    return value * PANEL_WIDTH / PANEL_DESIGN;
+}
+
+inline int panel_iy(int value) {
+    return value * PANEL_HEIGHT / PANEL_DESIGN;
+}
+
+// Builds the canvas for 1, 2, or 4 panels. Any other count is one panel.
+void panels_apply(int count);
+uint8_t *panel_frame();
+uint8_t *panel_turned();
+uint8_t *panel_extra();
+// Clears the shared grid so the next pattern can use it.
+void pattern_reset();
+uint8_t *pattern_alloc(int bytes);
 
 inline int clamp_channel(float value) {
     int rounded = (int)(value + 0.5f);
@@ -140,9 +191,6 @@ void feedback_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 
 void metaballs_start();
 void metaballs_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
-
-void reaction_start();
-void reaction_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 
 void life_start();
 void life_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);

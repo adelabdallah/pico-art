@@ -35,8 +35,6 @@ constexpr int STOP_COUNT = 12;
 constexpr float PI = 3.14159265f;
 constexpr float TWO_PI = 6.2831853f;
 constexpr float HALF_PI = 1.5707963f;
-constexpr float CX = (PANEL_WIDTH - 1) * 0.5f;
-constexpr float CY = (PANEL_HEIGHT - 1) * 0.5f;
 constexpr float CAM_PITCH = 0.95f;
 constexpr float PORTRAIT_R = 13.0f;
 constexpr float SPRING_K = 80.0f;
@@ -779,42 +777,42 @@ static void view_of(float x, float y, float z, float &sx, float &sy, float &dept
     float y1 = x * s + y * c;
     float sp = sinf(cam_pitch);
     float cp = cosf(cam_pitch);
-    sx = CX + x1;
-    sy = CY + y1 * sp - z * cp;
+    sx = panel_cx() + x1;
+    sy = panel_cy() + y1 * sp - z * cp;
     depth = y1 * cp + z * sp;
 }
 
 // zoom 0 leaves every world where it is. zoom 1 parks the focus body on the centre and spreads the rings.
 static void orient_screen(float &sx, float &sy, float fx, float fy, float zoom_now, float roll) {
     float scale = 1.0f + zoom_now * 2.4f;
-    sx = fx + (sx - fx) * scale + (CX - fx) * zoom_now;
-    sy = fy + (sy - fy) * scale + (CY - fy) * zoom_now;
-    float dx = sx - CX;
-    float dy = sy - CY;
+    sx = fx + (sx - fx) * scale + (panel_cx() - fx) * zoom_now;
+    sy = fy + (sy - fy) * scale + (panel_cy() - fy) * zoom_now;
+    float dx = sx - panel_cx();
+    float dy = sy - panel_cy();
     float c = cosf(roll);
     float s = sinf(roll);
-    sx = CX + dx * c - dy * s;
-    sy = CY + dx * s + dy * c;
+    sx = panel_cx() + dx * c - dy * s;
+    sy = panel_cy() + dx * s + dy * c;
 }
 
 static void to_screen(float lx, float ly, float body_cx, float body_cy, float roll, float &sx, float &sy) {
     float x = body_cx + lx;
     float y = body_cy + ly;
-    float dx = x - CX;
-    float dy = y - CY;
+    float dx = x - panel_cx();
+    float dy = y - panel_cy();
     float c = cosf(roll);
     float s = sinf(roll);
-    sx = CX + dx * c - dy * s;
-    sy = CY + dx * s + dy * c;
+    sx = panel_cx() + dx * c - dy * s;
+    sy = panel_cy() + dx * s + dy * c;
 }
 
 static void to_local(float sx, float sy, float body_cx, float body_cy, float roll, float &lx, float &ly) {
-    float dx = sx - CX;
-    float dy = sy - CY;
+    float dx = sx - panel_cx();
+    float dy = sy - panel_cy();
     float c = cosf(roll);
     float s = sinf(roll);
-    float x = CX + dx * c + dy * s;
-    float y = CY - dx * s + dy * c;
+    float x = panel_cx() + dx * c + dy * s;
+    float y = panel_cy() - dx * s + dy * c;
     lx = x - body_cx;
     ly = y - body_cy;
 }
@@ -832,7 +830,7 @@ static void draw_wide_stars(uint8_t *frame, uint32_t anim_ms, float zoom_now, fl
         float sy;
         float depth;
         view_of(x, y, z, sx, sy, depth);
-        orient_screen(sx, sy, CX, CY, zoom_now * 0.35f, roll);
+        orient_screen(sx, sy, panel_cx(), panel_cy(), zoom_now * 0.35f, roll);
         int level = star_level(n, anim_ms);
         int blue = level + (int)(n % 3u);
         paint_f(frame, sx, sy, level, level, blue, alpha);
@@ -1577,8 +1575,8 @@ static void draw_belt(uint8_t *frame, float body_cx, float body_cy, float roll, 
     }
     for (int n = 0; n < ROCKS; ++n) {
         int i = order[n];
-        float lx = rock_x[i] - CX;
-        float ly = rock_y[i] - CY;
+        float lx = rock_x[i] - panel_cx();
+        float ly = rock_y[i] - panel_cy();
         bool near_side = false;
         look_around(lx, ly, (rock_depth[i] - 0.72f) * 16.0f, near_side);
         (void)near_side;
@@ -1590,8 +1588,8 @@ static void draw_belt(uint8_t *frame, float body_cx, float body_cy, float roll, 
 }
 
 static void draw_portrait(uint8_t *frame, int stop, float offset, float alpha, float roll, uint32_t anim_ms) {
-    float body_cx = CX + offset;
-    float body_cy = CY;
+    float body_cx = panel_cx() + offset;
+    float body_cy = panel_cy();
     if (stop == STOP_BELT) {
         draw_belt(frame, body_cx, body_cy, roll, alpha, anim_ms);
         return;

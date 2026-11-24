@@ -30,7 +30,7 @@ struct Car {
 
 // The still harbour lives here for the life of the program.
 // start paints it again on each visit, and the camera copies one window out of it.
-static uint8_t plate[WORLD_H * WORLD_W * 3];
+static uint8_t *plate = nullptr;
 static Win windows[WINDOW_CAP];
 static int window_count = 0;
 static Car cars[9];
@@ -406,10 +406,14 @@ static void clamp_camera() {
     if (cam_y < 0) {
         cam_y = 0;
     }
-    if (cam_x > WORLD_W - PANEL_WIDTH) {
+    if (PANEL_WIDTH >= WORLD_W) {
+        cam_x = 0;
+    } else if (cam_x > WORLD_W - PANEL_WIDTH) {
         cam_x = WORLD_W - PANEL_WIDTH;
     }
-    if (cam_y > WORLD_H - PANEL_HEIGHT) {
+    if (PANEL_HEIGHT >= WORLD_H) {
+        cam_y = 0;
+    } else if (cam_y > WORLD_H - PANEL_HEIGHT) {
         cam_y = WORLD_H - PANEL_HEIGHT;
     }
 }
@@ -417,6 +421,7 @@ static void clamp_camera() {
 }  // namespace
 
 void skyline_start() {
+    plate = pattern_alloc(WORLD_H * WORLD_W * 3);
     cam_x = 16;
     cam_y = 20;
     paint_plate();
@@ -432,8 +437,21 @@ void skyline_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
     (void)dt_ms;
     float seconds = anim_ms * 0.001f;
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
-        const uint8_t *src = plate + ((cam_y + y) * WORLD_W + cam_x) * 3;
-        std::memcpy(frame + y * PANEL_WIDTH * 3, src, PANEL_WIDTH * 3);
+        int sy = cam_y + y;
+        uint8_t *row = frame + y * PANEL_WIDTH * 3;
+        if (sy < 0 || sy >= WORLD_H || cam_x >= WORLD_W) {
+            std::memset(row, 0, (size_t)PANEL_WIDTH * 3);
+            continue;
+        }
+        int copy = PANEL_WIDTH;
+        if (cam_x + copy > WORLD_W) {
+            copy = WORLD_W - cam_x;
+        }
+        const uint8_t *src = plate + (sy * WORLD_W + cam_x) * 3;
+        std::memcpy(row, src, (size_t)copy * 3);
+        if (copy < PANEL_WIDTH) {
+            std::memset(row + copy * 3, 0, (size_t)(PANEL_WIDTH - copy) * 3);
+        }
     }
     for (int i = 0; i < window_count; ++i) {
         int period = 4 + (i % 7);

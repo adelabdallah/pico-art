@@ -74,10 +74,10 @@ static void put(uint8_t *frame, int x, int y, int red, int green, int blue) {
 void voronoi_start() {
     rng_state = 9;
     for (int i = 0; i < SEEDS; ++i) {
-        seeds[i].cx = 10.0f + rnd() * 44.0f;
-        seeds[i].cy = 10.0f + rnd() * 44.0f;
-        seeds[i].ax = 6.0f + rnd() * 12.0f;
-        seeds[i].ay = 6.0f + rnd() * 12.0f;
+        seeds[i].cx = panel_sx(10.0f) + rnd() * panel_sx(44.0f);
+        seeds[i].cy = panel_sy(10.0f) + rnd() * panel_sy(44.0f);
+        seeds[i].ax = panel_sx(6.0f) + rnd() * panel_sx(12.0f);
+        seeds[i].ay = panel_sy(6.0f) + rnd() * panel_sy(12.0f);
         seeds[i].fx = 0.08f + rnd() * 0.12f;
         seeds[i].fy = 0.07f + rnd() * 0.12f;
         seeds[i].phase = rnd() * TAU;

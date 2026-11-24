@@ -17,8 +17,8 @@ constexpr float FADE = 2.2f;
 constexpr float TAU = 6.2831853f;
 constexpr int HUE_COUNT = 7;
 
-static int skyline[PANEL_WIDTH];
-static float window_roll[PANEL_WIDTH];
+static int skyline[PANEL_WIDTH_MAX];
+static float window_roll[PANEL_WIDTH_MAX];
 static int star_x[40];
 static int star_y[40];
 static float star_phase[40];
@@ -95,7 +95,7 @@ void fireworks_start() {
     int x = 0;
     while (x < PANEL_WIDTH) {
         int width = 3 + (int)(rnd() * 6.0f);
-        int height = 4 + (int)(rnd() * 8.0f);
+        int height = panel_iy(4) + (int)(rnd() * panel_sy(8.0f));
         for (int i = 0; i < width && x < PANEL_WIDTH; ++i, ++x) {
             skyline[x] = height;
             window_roll[x] = rnd();
@@ -103,7 +103,7 @@ void fireworks_start() {
     }
     for (int i = 0; i < 40; ++i) {
         star_x[i] = (int)(rnd() * PANEL_WIDTH);
-        star_y[i] = (int)(rnd() * 36.0f);
+        star_y[i] = (int)(rnd() * panel_sy(36.0f));
         star_phase[i] = rnd() * TAU;
     }
     for (int i = 0; i < 4; ++i) {

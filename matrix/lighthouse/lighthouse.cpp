@@ -11,9 +11,9 @@
 
 namespace {
 
-constexpr int HORIZON = 36;
-constexpr int LAMP_X = 44;
-constexpr int LAMP_Y = 16;
+#define HORIZON (panel_iy(36))
+#define LAMP_X (panel_ix(44))
+#define LAMP_Y (panel_iy(16))
 constexpr float BASE_SPIN = 1.2f;
 constexpr float RATE_FLOOR = 0.35f;
 constexpr float RATE_CAP = 3.5f;
@@ -34,7 +34,7 @@ struct Spray {
 
 static float spin_rate = 1.0f;
 static float spin_angle = 0.0f;
-static float rock_top[PANEL_WIDTH];
+static float rock_top[PANEL_WIDTH_MAX];
 static int bolt_x[40];
 static int bolt_y[40];
 static int bolt_count = 0;
@@ -127,7 +127,7 @@ static void advance_rain(int dt_ms) {
 }
 
 static void paint_tower(uint8_t *frame, float lamp) {
-    for (int y = LAMP_Y + 4; y < 42; ++y) {
+    for (int y = LAMP_Y + panel_iy(4); y < panel_iy(42); ++y) {
         float half = 2.2f + (float)(y - LAMP_Y) * 0.12f;
         int band = ((y - LAMP_Y - 4) / 3) % 2;
         for (int x = (int)(LAMP_X - half); x <= (int)(LAMP_X + half); ++x) {

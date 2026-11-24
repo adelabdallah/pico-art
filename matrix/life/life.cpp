@@ -24,9 +24,9 @@ static const uint8_t AGE_RGB[7][3] = {
     {138, 74, 216},
 };
 
-static uint8_t cells[2][PANEL_PIXELS];
-static uint16_t age[PANEL_PIXELS];
-static uint8_t dead[PANEL_PIXELS];
+static uint8_t *cells[2] = {nullptr, nullptr};
+static uint16_t *age = nullptr;
+static uint8_t *dead = nullptr;
 static int shown = 0;
 static int pending_ms = 0;
 static int epoch = 0;
@@ -162,6 +162,10 @@ static void paint_life(uint8_t *frame) {
 }  // namespace
 
 void life_start() {
+    cells[0] = pattern_alloc(PANEL_PIXELS);
+    cells[1] = pattern_alloc(PANEL_PIXELS);
+    age = (uint16_t *)pattern_alloc(PANEL_PIXELS * (int)sizeof(uint16_t));
+    dead = pattern_alloc(PANEL_PIXELS);
     seed_n = 1;
     pending_ms = 0;
     epoch = 0;

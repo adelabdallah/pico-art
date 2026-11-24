@@ -352,10 +352,10 @@ static_assert(sizeof BALL_CELLS == 5 * 4, "sponge ball");
 static_assert(sizeof CLAM_CELLS == 4 * 3, "clam");
 static_assert(sizeof SNAIL_CELLS == 4 * 4, "snail");
 
-static uint8_t region[PANEL_PIXELS];
-static uint8_t scene[PANEL_PIXELS * 3];
-static uint8_t beam_gain[PANEL_PIXELS];
-static int rock_top[PANEL_WIDTH];
+static uint8_t *region = nullptr;
+static uint8_t *scene = nullptr;
+static uint8_t *beam_gain = nullptr;
+static int rock_top[PANEL_WIDTH_MAX];
 static Group groups[GROUP_CAP];
 static uint32_t rng = 0x5EEDC0A1u;
 
@@ -538,7 +538,7 @@ static void cast_beams(uint32_t anim_ms) {
     int beam_count = (int)(sizeof BEAMS / sizeof BEAMS[0]);
     for (int i = 0; i < beam_count; ++i) {
         const Beam &beam = BEAMS[i];
-        bool stopped[PANEL_WIDTH] = {};
+        bool stopped[PANEL_WIDTH_MAX] = {};
         float wobble = sinf(anim_ms * beam.speed + beam.phase);
         float origin = beam.origin_x + wobble * beam.drift;
         float angle = beam.angle + wobble * 0.04f;
@@ -2473,6 +2473,9 @@ static void draw_life(uint32_t anim_ms) {
 }  // namespace
 
 void reef_start() {
+    region = pattern_alloc(PANEL_PIXELS);
+    scene = pattern_alloc(PANEL_PIXELS * 3);
+    beam_gain = pattern_alloc(PANEL_PIXELS);
     rng = 0x5EEDC0A1u;
     build_mask();
     init_bubbles();
