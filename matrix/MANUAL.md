@@ -296,3 +296,7 @@ The right OLED uses the same OLED timer as the left OLED. A button, a click on e
 ### Phase 3
 
 Each Pico gets an nRF24L01+. The header is the one drawn under Pins. The plug comes off, and the radios carry the same controls, the tilt, and the same OLED updates. Everything phase 2 adds, and everything the sections above this TODO describe, still works over the radios. The delay stays low enough that a turn, a press, and a hold still feel attached to the picture.
+
+### Upgrades
+
+A Pimoroni Pico LiPo 2 can take the place of a Pico 2W. The header matches. The extra memory adds a lot of room for the patterns. https://www.pishop.ca/product/pimoroni-pico-lipo-2/
