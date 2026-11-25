@@ -343,6 +343,8 @@ enum Hub75ChainMode
 
 void create_hub75_driver(uint w, uint h, uint pt, bool stb_inverted);
 void start_hub75_driver();
+// Heap bytes the scan buffers take for this canvas. panels_apply leaves this much free.
+int hub75_scan_bytes(int width, int height);
 void update_bgr(const uint8_t *src);
 #if USE_PICO_GRAPHICS == true
 void update(PicoGraphics const *graphics);

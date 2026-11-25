@@ -1,15 +1,17 @@
 #include "pattern.hpp"
 
+#include "hub75.hpp"
 #include "pico/stdlib.h"
 
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <unistd.h>
 
 int PANEL_WIDTH = 128;
 int PANEL_HEIGHT = 64;
 int PANEL_PIXELS = 128 * 64;
-int PANEL_COUNT = 2;
+int PANEL_COUNT = 4;
 
 static uint8_t *picture = nullptr;
 static uint8_t *turned_buf = nullptr;
@@ -53,6 +55,23 @@ uint8_t *pattern_alloc(int bytes) {
     return out;
 }
 
+int pattern_room() {
+    if (arena == nullptr || arena_used > arena_bytes) {
+        return 0;
+    }
+    return arena_bytes - arena_used;
+}
+
+// malloc refuses a block that would pass the end of the 512 KB bank. The tail is what is still below that.
+static int heap_tail() {
+    extern char __StackLimit;
+    char *brk = (char *)sbrk(0);
+    if (brk >= &__StackLimit) {
+        return 0;
+    }
+    return (int)(&__StackLimit - brk);
+}
+
 void panels_apply(int count) {
     if (count == 2) {
         PANEL_WIDTH = 128;
@@ -76,10 +95,18 @@ void panels_apply(int count) {
 
     int grid = 5 * PANEL_PIXELS;
     int plate = 192 * 108 * 3;
+    int floor_bytes = grid > plate ? grid : plate;
     int flow_bytes = flow_particle_cap(PANEL_PIXELS) * FLOW_PARTICLE_BYTES;
-    int need = grid > plate ? grid : plate;
-    if (flow_bytes > need) {
-        need = flow_bytes;
+    int ideal = flow_bytes > floor_bytes ? flow_bytes : floor_bytes;
+    // Headers on the arena and the scan buffers, which the other core takes after this returns.
+    constexpr int HEAP_SLACK = 8 * 1024;
+    int room = heap_tail() - hub75_scan_bytes(PANEL_WIDTH, PANEL_HEIGHT) - HEAP_SLACK;
+    if (room < floor_bytes) {
+        panic("panel memory");
+    }
+    int need = ideal;
+    if (need > room) {
+        need = room;
     }
     if (need != arena_bytes) {
         std::free(arena);

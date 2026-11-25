@@ -86,6 +86,7 @@ inline float scene_yf(float value) {
 
 // The busy flow field aims at about 75 percent of the panel, with about 6 lit pixels per particle.
 // A beat can add that many particles again, so the cap is twice the busy field.
+// panels_apply may leave a smaller arena when the scan buffers need the rest of SRAM, and flow_start stops at that.
 constexpr float FLOW_COVER_HIGH = 0.75f;
 constexpr float FLOW_BURST_HIGH = 0.75f;
 constexpr float FLOW_FOOTPRINT = 6.0f;
@@ -107,6 +108,8 @@ uint8_t *panel_extra();
 // Clears the shared grid so the next pattern can use it.
 void pattern_reset();
 uint8_t *pattern_alloc(int bytes);
+// Bytes still free in the arena.
+int pattern_room();
 
 inline int clamp_channel(float value) {
     int rounded = (int)(value + 0.5f);

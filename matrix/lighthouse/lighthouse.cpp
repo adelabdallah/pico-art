@@ -36,8 +36,9 @@ struct Spray {
 static float spin_rate = 1.0f;
 static float spin_angle = 0.0f;
 static float rock_top[PANEL_WIDTH_MAX];
-static int bolt_x[40];
-static int bolt_y[40];
+// One sample per sky row, down to the water. Four panels add sky above the 64px picture.
+static int bolt_x[PANEL_HEIGHT_MAX];
+static int bolt_y[PANEL_HEIGHT_MAX];
 static int bolt_count = 0;
 static Drop drops[240];
 static Spray spray[36];
@@ -73,7 +74,7 @@ static void put(uint8_t *frame, int x, int y, int red, int green, int blue) {
 static void make_bolt() {
     bolt_count = 0;
     float bx = 4.0f + rnd() * (float)(PANEL_WIDTH - 8);
-    for (int y = 0; y < HORIZON && bolt_count < 40; ++y) {
+    for (int y = 0; y < HORIZON && bolt_count < PANEL_HEIGHT_MAX; ++y) {
         bolt_x[bolt_count] = (int)(bx + 0.5f);
         bolt_y[bolt_count] = y;
         bolt_count += 1;

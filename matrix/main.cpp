@@ -51,8 +51,8 @@
 // Yellow tours the orrery and each world, holding each for 5 seconds. The view tumbles slowly, and the nod is the large swing so the poles pass through the disc. Each world stays centred. The Moon and Charon speed up. Another press stops the tour. A play mark bobs on the OLED while it runs.
 // On skyline, orange moves the view up and yellow moves it down. The encoder moves the view left and right, and the view stops at the edge of the harbour.
 // On lighthouse, ferris wheel, and galaxy, the encoder changes how fast the beam, the wheel, and the disk move. Clockwise is faster. The sea, the rim lights, and the stars keep their own pace.
-// On flow field, the encoder sets how much of the panel the streams cover. Clockwise is denser, from about 15 percent of the panel up to about 75 percent.
-// A beat bends the field, brightens the streams, shifts their hue, and hurries them, and adds extra streams in proportion to that cover. At the busy end it adds about as many again, and they collapse. The dim field keeps its light and turns with the bend.
+// On flow field, the encoder sets how much of the panel the streams cover. Clockwise is denser, from about 15 percent of the panel up to about 75 percent. On four panels the busy end stops where the scratch memory runs out.
+// A beat bends the field, brightens the streams, shifts their hue, and hurries them, and adds extra streams in proportion to that cover. At the busy end it adds about as many again, and they collapse. On four panels those extras appear only while room remains. The dim field keeps its light and turns with the bend.
 // On lighthouse, yellow strikes lightning and orange thickens the rain. The rain rises for a second, holds for a second, and falls for a second. Holding orange keeps the rain thick.
 // On campfire, orange throws sparks and yellow flares the flame. Holding either keeps that going.
 // Green sends one comet across the milky way. A hold keeps a meteor shower along that band, and letting go thins new meteors out over 3 seconds. The picture stays upright.
@@ -288,7 +288,7 @@ static SettingRow setting_rows[] = {
     {"PANELS:", OledIcon::Axes},
 };
 
-static Settings settings = {0, BRIGHTNESS_PERCENT, 0.0f, 50, 50, 100, LED_TIMER_DEFAULT, OLED_TIMER_DEFAULT, 1, DBL_DEFAULT_MS, 0, 2};
+static Settings settings = {0, BRIGHTNESS_PERCENT, 0.0f, 50, 50, 100, LED_TIMER_DEFAULT, OLED_TIMER_DEFAULT, 1, DBL_DEFAULT_MS, 0, 4};
 static uint32_t anim_ms = 0;
 static float anim_frac = 0.0f;
 static bool matrix_blank = false;

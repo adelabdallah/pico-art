@@ -71,9 +71,9 @@ Four panels are powered as two pairs. Each pair takes one +V and one −V from t
 
 ## Panels
 
-The panel count is a stored setting. The choices are 1, 2, and 4. While the buttons are unwired, a new board, and any board whose saved settings are older than this setting, boots as 2. Changing it saves at once and takes effect on the next boot. The scan locks the chain length when it starts, so the picture stays wrong until that reboot. The OLED and the encoder still work while the picture is wrong, which is how the count gets changed.
+The panel count is a stored setting. The choices are 1, 2, and 4. While the buttons are unwired, a new board, and any board whose saved settings are older than this setting, boots as 4. Changing it saves at once and takes effect on the next boot. The scan locks the chain length when it starts, so the picture stays wrong until that reboot. The OLED and the encoder still work while the picture is wrong, which is how the count gets changed.
 
-One panel is 64 by 64. Two panels are 128 wide by 64 tall. From the front, the Pico's panel is the right one and the HUB75 cable runs left. Four panels are 128 by 128. From the front, the Pico's panel is the bottom right. The cable runs left, then up, then right. Every panel stays upright, with the same edge up.
+One panel is 64 by 64. Two panels are 128 wide by 64 tall. From the front, the Pico's panel is the right one and the HUB75 cable runs left. Four panels are 128 by 128. From the front, the Pico's panel is the bottom right. The cable runs left, then up, then right. Every panel stays the same way up. Four panels use one brightness step per bit so the scan buffers fit. One and two panels keep the split steps.
 
 ```text
 [ top left ] --> [ top right ]
@@ -99,7 +99,7 @@ Boot plays an intro, then fades in the saved pattern. With a blank memory that p
 
 A glass phrase fills over 3 seconds and sways a little. A coloured stroke sits on the pixels that touch the letters, and a white stroke sits one pixel further out. The liquid inside shifts through a rainbow, one turn about every 0.7 seconds. Each boot picks one phrase at random: BOOTING, LOADING, PAINTING, NOW IN 3D!, BEEP BOOP, or WOWZA. NOW IN 3D! is two lines, with 3D! larger and underneath. BEEP BOOP is two lines of the same size. A phrase shrinks until the whole word fits on the panel. The word then flickers, slowly and then quickly, and fades over 1 second. A starfield shows through that flicker. The stars speed up over 1 second, rush into the centre, and fade to black over 1 second.
 
-XYLO slides in from the left. SCOPE grows out of the centre. The two words sit one above the other in the middle of the panel. Both have landed after about 1.2 seconds. The letters are 28 pixels tall and sit in the middle of the panel. On one panel they stay one pixel clear of the border. XYLO is blocky, with straight edges. SCOPE has rounded edges. Both words are the same height. XYLO is red, yellow, green, then blue. SCOPE is chrome. A rainbow of seven colours chases the border for 2 seconds. The border is one pixel wide, and both words fill while the rainbow runs. A small pop follows, and a gold shine sweeps the whole panel from the top left to the bottom right. The rainbow border then locks and holds. The letters fly toward the camera in about a third of a second, and the saved pattern fades in over 2 seconds.
+XYLO slides in from the left. SCOPE grows out of the centre. The two words sit one above the other in the middle of the panel. Both have landed after about 1.2 seconds. The letters are 28 pixels tall on one panel and stay one pixel clear of the border. On four panels they keep that same share of the square. XYLO is blocky, with straight edges. SCOPE has rounded edges. Both words are the same height. XYLO is red, yellow, green, then blue. SCOPE is chrome. A rainbow of seven colours chases the border for 2 seconds. The border is one pixel wide, and both words fill while the rainbow runs. A small pop follows, and a gold shine sweeps the whole panel from the top left to the bottom right. The rainbow border then locks and holds. The letters fly toward the camera in about a third of a second, and the saved pattern fades in over 2 seconds.
 
 Red skips the intro at any moment, including the fade. The saved pattern appears on the next frame, already running. After the intro, red pauses the picture again. The other buttons and the encoder wait until the intro ends. The OLED yellow band reads XYLOSCOPE for the whole intro.
 
@@ -155,9 +155,9 @@ Campfire, lighthouse, ferris wheel, aurora, and fireworks keep the 64 by 64 pict
 
 ### Flow field
 
-The encoder sets how much of the panel the streams cover. Clockwise fills more of the panel. The sparse end covers about 15 percent. The busy end covers about 75 percent.
+The encoder sets how much of the panel the streams cover. Clockwise fills more of the panel. The sparse end covers about 15 percent. The busy end covers about 75 percent. On four panels the busy end stops where the scratch memory runs out.
 
-A beat adds extra streams in proportion to that setting. At the sparse end it adds none. At the busy end it adds about as many as are already on the panel. The extra streams finish their path and collapse back to the level the encoder set.
+A beat adds extra streams in proportion to that setting. At the sparse end it adds none. At the busy end it adds about as many as are already on the panel. On four panels those extras appear only while room remains. The extra streams finish their path and collapse back to the level the encoder set.
 
 Green starts and stops the microphone. Listening starts on. With the microphone stopped, the field holds its path and no extra streams appear. Yellow adds a round mirror. Orange still adds a diagonal mirror. Red and blue keep their shared actions.
 
@@ -205,7 +205,7 @@ The encoder changes how fast the wheel moves. Clockwise is faster. The rim light
 
 ### Fireworks
 
-Orange launches a small shell. Yellow launches a large one. Shells still launch on their own.
+Orange launches a small shell. Yellow launches a large one. Shells still launch on their own. On four panels about a third of those shells burst in the sky above the buildings, on the top two panels.
 
 Windows blink on their own. Each lit window keeps a random colour.
 
@@ -239,7 +239,7 @@ The values, in order:
 | Double click | 200 to 800 milliseconds, in steps of 50 | 400 milliseconds |
 | Panel timer | 1, 2, 5, 10, 15, 30, 60 minutes, or forever | Forever |
 | OLED timer | 1, 2, 5, 10, 15, 30, or 60 minutes | 2 minutes |
-| Panels | 1, 2, or 4 | 2 |
+| Panels | 1, 2, or 4 | 4 |
 
 Panels is the chain length. 1 is one 64 by 64 panel. 2 is a 128 by 64 pair, Pico on the right, cable running left. 4 is a 128 by 128 square, Pico on the bottom right, cable left, then up, then right. The new count is stored when the encoder changes it, and the picture uses it on the next boot.
 

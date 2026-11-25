@@ -238,7 +238,16 @@ void flow_start() {
     beat_level = 0.0f;
     bend = 0.0f;
     environment_arm_listen();
-    particle_cap = flow_particle_cap(PANEL_PIXELS);
+    // The arena keeps the life and reef grids first. A four panel canvas uses whatever bytes remain.
+    int cap = flow_particle_cap(PANEL_PIXELS);
+    int fit = pattern_room() / (int)sizeof(Particle);
+    if (cap > fit) {
+        cap = fit;
+    }
+    if (cap < 8) {
+        cap = 8;
+    }
+    particle_cap = cap;
     particles = (Particle *)pattern_alloc((int)sizeof(Particle) * particle_cap);
     standing_count = count_for_density();
     particle_count = standing_count;

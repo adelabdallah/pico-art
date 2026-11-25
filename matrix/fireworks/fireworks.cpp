@@ -6,6 +6,7 @@
 // Orange launches a small shell. Yellow launches a large one.
 // Windows blink on their own, each in a random colour.
 // Green sends one spinning star across the sky, from either side. A hold sends more, both ways. Shells keep launching.
+// On a taller chain some of those shells burst in the sky above the 64px picture.
 
 #include "pattern.hpp"
 
@@ -297,6 +298,15 @@ static void paint_shoots(uint8_t *frame) {
     }
 }
 
+// Extra sky sits above the 64px picture. Some shells burst up there, on the top panels.
+static float burst_y(float unit, float pick) {
+    int extra = scene_dy();
+    if (extra >= 24 && pick < 0.35f) {
+        return 8.0f + unit * ((float)extra - 16.0f);
+    }
+    return (float)extra + 6.0f + unit * 18.0f;
+}
+
 void fireworks_launch(bool large) {
     int slot = 0;
     for (int i = 0; i < 4; ++i) {
@@ -362,7 +372,7 @@ void fireworks_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
         Shell &shell = shells[shell_count];
         shell.age = age;
         shell.bx = 8.0f + hash_unit(id, 1) * (PANEL_WIDTH - 16);
-        shell.by = (float)scene_dy() + 6.0f + hash_unit(id, 2) * 18.0f;
+        shell.by = burst_y(hash_unit(id, 2), hash_unit(id, 8));
         shell.sx = shell.bx + (hash_unit(id, 4) - 0.5f) * 10.0f;
         shell.hue = (int)(hash_unit(id, 3) * HUE_COUNT);
         shell.hue2 = (int)(hash_unit(id, 7) * HUE_COUNT);

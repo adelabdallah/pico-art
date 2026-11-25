@@ -271,12 +271,23 @@ static Stamp make_stamp(const char *text, int sx, int sy, int gap) {
     return stamp;
 }
 
+// A 64px side uses the drawn letters as they are. A larger square keeps that share of the panel.
+static int splash_scale() {
+    int side = PANEL_WIDTH < PANEL_HEIGHT ? PANEL_WIDTH : PANEL_HEIGHT;
+    int scale = side / PANEL_DESIGN;
+    if (scale < 1) {
+        scale = 1;
+    }
+    return scale;
+}
+
 static Stamp make_splash_stamp(const char *text, int kind) {
-    Stamp stamp = make_stamp(text, 1, 1, 1);
+    int scale = splash_scale();
+    Stamp stamp = make_stamp(text, scale, scale, scale);
     stamp.kind = kind;
-    int glyph_w = kind == 1 ? 14 : 11;
-    stamp.width = stamp.count * glyph_w + (stamp.count - 1) * stamp.gap;
-    stamp.height = 28;
+    int glyph_w = (kind == 1 ? 14 : 11) * scale;
+    stamp.width = stamp.count * glyph_w + (stamp.count - 1) * scale;
+    stamp.height = 28 * scale;
     return stamp;
 }
 
@@ -315,16 +326,20 @@ static bool block_cell(char code, int col, int row) {
 }
 
 static bool block_word_ink(const Stamp &stamp, int x, int y, int &index) {
-    int advance = 14 + stamp.gap;
+    int pixel = stamp.sx * 2;
+    if (pixel < 2) {
+        pixel = 2;
+    }
+    int advance = 7 * pixel + stamp.gap;
     index = x / advance;
     if (index < 0 || index >= stamp.count) {
         return false;
     }
     int local = x - index * advance;
-    if (local < 0 || local >= 14) {
+    if (local < 0 || local >= 7 * pixel) {
         return false;
     }
-    return block_cell(stamp.text[index], local / 2, y / 2);
+    return block_cell(stamp.text[index], local / pixel, y / pixel);
 }
 
 static float ellip(float x, float y, float cx, float cy, float rx, float ry) {
@@ -423,16 +438,20 @@ static bool round_cell(char code, int col, int row) {
 }
 
 static bool round_word_ink(const Stamp &stamp, int x, int y, int &index) {
-    int advance = 11 + stamp.gap;
+    int scale = stamp.sx;
+    if (scale < 1) {
+        scale = 1;
+    }
+    int advance = 11 * scale + stamp.gap;
     index = x / advance;
     if (index < 0 || index >= stamp.count) {
         return false;
     }
     int local = x - index * advance;
-    if (local < 0 || local >= 11) {
+    if (local < 0 || local >= 11 * scale) {
         return false;
     }
-    return round_cell(stamp.text[index], local, y);
+    return round_cell(stamp.text[index], local / scale, y / scale);
 }
 
 static bool stamp_ink(const Stamp &stamp, int x, int y, int &index) {
@@ -1116,11 +1135,12 @@ static bool sample_stamp(const Place &place, const Stamp &stamp, int x, int y, i
 }
 
 static void chrome_rgb(const Stamp &stamp, int lx, int ly, float glint, int &red, int &green, int &blue) {
+    int edge = stamp.sx > 1 ? stamp.sx : 1;
     int index = 0;
-    bool up = !stamp_ink(stamp, lx, ly - 1, index);
-    bool left = !stamp_ink(stamp, lx - 1, ly, index);
-    bool down = !stamp_ink(stamp, lx, ly + 1, index);
-    bool right = !stamp_ink(stamp, lx + 1, ly, index);
+    bool up = !stamp_ink(stamp, lx, ly - edge, index);
+    bool left = !stamp_ink(stamp, lx - edge, ly, index);
+    bool down = !stamp_ink(stamp, lx, ly + edge, index);
+    bool right = !stamp_ink(stamp, lx + edge, ly, index);
     red = 176;
     green = 186;
     blue = 198;
@@ -1156,7 +1176,8 @@ static void word_colour(const Stamp &stamp, int lx, int ly, int index, bool chro
     } else if (in_pop) {
         glint_phase = 4.0f;
     }
-    float glint = sinf(lx * 0.55f + ly * 0.25f + glint_phase);
+    float letter_px = stamp.sx > 1 ? (float)stamp.sx : 1.0f;
+    float glint = sinf(lx * 0.55f / letter_px + ly * 0.25f / letter_px + glint_phase);
     if (chrome) {
         chrome_rgb(stamp, lx, ly, glint, red, green, blue);
     } else {
@@ -1174,7 +1195,7 @@ static void word_colour(const Stamp &stamp, int lx, int ly, int index, bool chro
     float wash = 0.0f;
     float surf = 0.0f;
     if (in_chase) {
-        float slosh = sinf(lx * 0.5f - chase * 7.0f) * 1.5f * (1.0f - chase);
+        float slosh = sinf(lx * 0.5f / letter_px - chase * 7.0f) * 1.5f * letter_px * (1.0f - chase);
         surf = (1.0f - chase) * (float)stamp.height + slosh;
         if (chase >= 0.98f || ly + 0.5f >= surf) {
             wash = 1.0f;
@@ -1189,9 +1210,9 @@ static void word_colour(const Stamp &stamp, int lx, int ly, int index, bool chro
     int liquid_r = 255;
     int liquid_g = 255;
     int liquid_b = 255;
-    bool crest = (ly + 0.5f - surf) < 1.3f;
+    bool crest = (ly + 0.5f - surf) < 1.3f * letter_px;
     if (chrome) {
-        float depth = (ly + 0.5f - surf) / 8.0f;
+        float depth = (ly + 0.5f - surf) / (8.0f * letter_px);
         if (depth < 0.0f) {
             depth = 0.0f;
         }
@@ -1318,15 +1339,16 @@ static void paint_splash(uint8_t *frame) {
     float ease = 1.0f - inv * inv * inv;
     Place xylo_at;
     Place scope_at;
-    // One pixel clear of the border, with a 2px gap between the words.
+    // The same clearance and gap as a 64px panel, grown with the square.
+    float word_gap = 2.0f * (float)splash_scale();
     float word_left = (float)((PANEL_WIDTH - xylo.width) / 2);
-    float block = (float)xylo.height + 2.0f + (float)scope.height;
+    float block = (float)xylo.height + word_gap + (float)scope.height;
     float word_top = ((float)PANEL_HEIGHT - block) * 0.5f;
     if (word_top < 3.0f) {
         word_top = 3.0f;
     }
     rest_place(xylo_at, word_left, word_top, (float)xylo.width, (float)xylo.height);
-    rest_place(scope_at, word_left, word_top + (float)xylo.height + 2.0f, (float)scope.width, (float)scope.height);
+    rest_place(scope_at, word_left, word_top + (float)xylo.height + word_gap, (float)scope.width, (float)scope.height);
     if (elapsed < (uint32_t)CHASE_AT) {
         xylo_at.shift = (1.0f - ease) * -(xylo_at.left + (float)xylo.width + 8.0f);
         scope_at.ox = panel_cx();

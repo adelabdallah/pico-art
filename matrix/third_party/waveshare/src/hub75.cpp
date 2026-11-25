@@ -95,21 +95,49 @@ static const uint8_t BCM_SEQUENCE[] = {
     0, 9, 2, 7, 4, 5, 1, 8, 3, 6 // 10 steps
 };
 #endif
+static const uint8_t *bcm_sequence = BCM_SEQUENCE;
+static uint8_t bcm_sequence_length = sizeof(BCM_SEQUENCE);
+static bool bcm_split = BALANCED_LIGHT_OUTPUT == true;
+static void bcm_choose(uint32_t pixels)
+{
+    (void)pixels;
+}
 #elif BITPLANES == 8
+static const uint8_t BCM_PLAIN[] = {
+    0, 7, 2, 5, 1, 6, 3, 4
+};
 #if BALANCED_LIGHT_OUTPUT == true
-// Split sequence for 8 bitplanes
-// Split BP 7 into 3 parts, BP 6 into 2 parts
-static const uint8_t BCM_SEQUENCE[] = {
-    7, 0, 6, 1, 7, 2, 5, 3, 7, 4, 6 // 11 steps instead of 8
+// Split sequence for 8 bitplanes. BP 7 is in three parts, BP 6 in two.
+static const uint8_t BCM_BALANCED[] = {
+    7, 0, 6, 1, 7, 2, 5, 3, 7, 4, 6
 };
+static const uint8_t *bcm_sequence = BCM_BALANCED;
+static uint8_t bcm_sequence_length = sizeof(BCM_BALANCED);
+static bool bcm_split = true;
 #else
-static const uint8_t BCM_SEQUENCE[] = {
-    0, 7, 2, 5, 1, 6, 3, 4 // 8 steps
-};
+static const uint8_t *bcm_sequence = BCM_PLAIN;
+static uint8_t bcm_sequence_length = sizeof(BCM_PLAIN);
+static bool bcm_split = false;
 #endif
+// Four panels are 16384 pixels. The split steps do not fit beside the pictures and the life grid.
+static void bcm_choose(uint32_t pixels)
+{
+#if BALANCED_LIGHT_OUTPUT == true
+    if (pixels > 8192u)
+    {
+        bcm_sequence = BCM_PLAIN;
+        bcm_sequence_length = (uint8_t)sizeof(BCM_PLAIN);
+        bcm_split = false;
+        return;
+    }
+    bcm_sequence = BCM_BALANCED;
+    bcm_sequence_length = (uint8_t)sizeof(BCM_BALANCED);
+    bcm_split = true;
+#else
+    (void)pixels;
 #endif
-
-constexpr uint8_t bcm_sequence_length = sizeof(BCM_SEQUENCE) / sizeof(uint8_t);
+}
+#endif
 
 static void configure_pio(bool);
 static void setup_dma_transfers();
@@ -344,29 +372,30 @@ void hub75_build_row_cmd_buffer(uint32_t brightness_fp)
     uint32_t idx = 0;
 
     // Iterate through BCM sequence
-    for (uint8_t bp : BCM_SEQUENCE)
+    for (uint8_t step = 0; step < bcm_sequence_length; ++step)
     {
+        uint8_t bp = bcm_sequence[step];
         uint32_t split_factor = 1;
 #if BALANCED_LIGHT_OUTPUT
 #if BITPLANES == 10
-        if (bp == 9)
+        if (bcm_split && bp == 9)
         {
             // Calculate the "weight" of this slice
             // Split BP 9 into 4 parts, each part gets 1/4 of the duration
             split_factor = 4;
         }
-        else if (bp == 8)
+        else if (bcm_split && bp == 8)
         {
             split_factor = 2;
         }
 #elif BITPLANES == 8
-        if (bp == 7)
+        if (bcm_split && bp == 7)
         {
             // Calculate the "weight" of this slice
             // Split BP 7 into 3 parts, each part gets 1/3 of the duration
             split_factor = 3;
         }
-        else if (bp == 6)
+        else if (bcm_split && bp == 6)
         {
             split_factor = 2;
         }
@@ -594,7 +623,7 @@ void read_chan_handler()
     if (++bitplane < bcm_sequence_length)
     {
         // Set shift to suit next bitplane
-        uint shamt = BCM_SEQUENCE[bitplane];
+        uint shamt = bcm_sequence[bitplane];
         hub75_bitplane_setup_set_shift(pio_config.pio_read, pio_config.sm_read, pio_config.offs_read, shamt);
 
         // Prepare DMA channels for building next bitplane
@@ -609,7 +638,7 @@ void read_chan_handler()
 
         // Reset shift for bitplane 0
         bitplane = 0;
-        uint shamt = BCM_SEQUENCE[bitplane];
+        uint shamt = bcm_sequence[bitplane];
         hub75_bitplane_setup_set_shift(pio_config.pio_read, pio_config.sm_read, pio_config.offs_read, shamt);
 
         // frame_buffer rebuild is complete.
@@ -681,9 +710,21 @@ void setup_bitplane_stream_irq()
  * @param w Width of the HUB75 display in pixels.
  * @param h Height of the HUB75 display in pixels.
  */
+int hub75_scan_bytes(int width, int height)
+{
+    uint32_t pixels = (uint32_t)width * (uint32_t)height;
+    bcm_choose(pixels);
+    int plane = (int)((pixels >> 1) * bcm_sequence_length);
+    int frames = plane * 2;
+    int rgb = (int)(pixels * (uint32_t)sizeof(uint32_t));
+    int rows = (int)(sizeof(row_cmd_t) * PanelConfig::SCAN_DEPTH * bcm_sequence_length) * 2;
+    return frames + rgb + rows;
+}
+
 void create_hub75_driver(uint w, uint h, uint panel_type = PANEL_TYPE, bool inverted_stb = INVERTED_STB)
 {
     hub75_use_geometry(w, h);
+    bcm_choose(hub75_pixels);
     frame_buffer1 = new uint8_t[(hub75_pixels >> 1) * bcm_sequence_length];
     frame_buffer2 = new uint8_t[(hub75_pixels >> 1) * bcm_sequence_length];
 
@@ -1340,8 +1381,8 @@ __attribute__((optimize("unroll-loops"))) void update(
  */
 // One clock carries a pixel and the pixel 32 rows below it on the same panel.
 // From the front, the Pico's panel is the right one. Two panels are that row,
-// cable running left. Four panels continue up and then right, so the top row
-// is clocked from the far end and each of those panels is filled right to left.
+// cable running left. Four panels continue up and then right. Every panel
+// stays the same way up. Data enters each panel on its right and leaves on its left.
 static void gather_live_bgr(const uint8_t *src)
 {
     int index = 0;
@@ -1351,35 +1392,39 @@ static void gather_live_bgr(const uint8_t *src)
         for (int clock = 0; clock < clocks; ++clock)
         {
             int x = clock;
-            int y = row;
+            int upper_y = row;
+            int lower_y = row + 32;
             if (hub75_height == 128)
             {
                 int band = clock >> 6;
                 int i = clock & 63;
-                int local = row;
                 if (band == 0)
                 {
-                    x = 127 - i;
-                    y = local;
+                    x = 64 + i;
+                    upper_y = row;
+                    lower_y = row + 32;
                 }
                 else if (band == 1)
                 {
-                    x = 63 - i;
-                    y = local;
+                    x = i;
+                    upper_y = row;
+                    lower_y = row + 32;
                 }
                 else if (band == 2)
                 {
                     x = i;
-                    y = 64 + local;
+                    upper_y = 64 + row;
+                    lower_y = 96 + row;
                 }
                 else
                 {
                     x = 64 + i;
-                    y = 64 + local;
+                    upper_y = 64 + row;
+                    lower_y = 96 + row;
                 }
             }
-            const uint8_t *upper = src + (y * hub75_width + x) * 3;
-            const uint8_t *lower = src + ((y + 32) * hub75_width + x) * 3;
+            const uint8_t *upper = src + (upper_y * hub75_width + x) * 3;
+            const uint8_t *lower = src + (lower_y * hub75_width + x) * 3;
             rgb_buffer[index++] = LUT_MAPPING_RGB(upper[2], upper[1], upper[0]);
             rgb_buffer[index++] = LUT_MAPPING_RGB(lower[2], lower[1], lower[0]);
         }
