@@ -1,7 +1,8 @@
 // A terrain map solved tile by tile, then villages, paths, and travellers.
 // The map follows Wave Function Collapse at
 // https://www.ascii-magic.com/ascii/wave-function-collapse
-// The collapse plays on the panel. A finished map is at least half land.
+// The collapse plays on the panel. A few water seeds grow into lakes and seas
+// while most of the map stays land, and a river sometimes joins two lakes.
 // Villages then sit on sand, grass, and forest. People walk the land, sail the water,
 // and wear sandy paths where they repeat a route.
 // Green pressed twice, inside the double-click window, solves a new map.
@@ -18,7 +19,8 @@ namespace {
 
 constexpr int TILES = 7;
 constexpr uint8_t ALL_TILES = 127;
-constexpr int WEIGHT[TILES] = {3, 4, 2, 6, 4, 2, 1};
+constexpr int SEED_LIMIT = 4;
+constexpr int WATER_CAP_PERCENT = 24;
 constexpr int VILLAGE_CAP = 16;
 constexpr int BLOCK_CAP = 15;
 constexpr int PERSON_CAP = 36;
@@ -30,6 +32,7 @@ constexpr float WALK_PX_PER_MS = 0.012f;
 constexpr int MODE_WAIT = 0;
 constexpr int MODE_MOVE = 1;
 constexpr int MODE_REST = 2;
+constexpr int MODE_VISIT = 3;
 
 constexpr uint8_t INK[TILES][2][3] = {
     {{10, 42, 90}, {18, 58, 122}},
@@ -41,8 +44,9 @@ constexpr uint8_t INK[TILES][2][3] = {
     {{220, 230, 240}, {255, 255, 255}},
 };
 
-// Cyan stays apart from the water.
-constexpr uint8_t ROOF[6][3] = {
+// Cyan stays apart from the water. Villages take these colours in order.
+constexpr int ROOF_COUNT = 6;
+constexpr uint8_t ROOF[ROOF_COUNT][3] = {
     {220, 48, 40},
     {236, 132, 36},
     {240, 204, 64},
@@ -74,8 +78,8 @@ struct Person {
     uint8_t stops[4];
     uint8_t stop_count;
     uint8_t stop_i;
-    uint8_t horse;
     uint8_t mode;
+    uint8_t through;
 };
 
 struct Smoke {
@@ -106,9 +110,14 @@ static Spark sparks[SPARK_CAP];
 static int spark_write = 0;
 static int village_count = 0;
 static int person_n = 0;
-static int land_boost = 0;
-static int contradictions = 0;
 static int scan_cursor = 0;
+static int water_count = 0;
+static int seed_n = 0;
+static int seeds_closed = 0;
+static int seed_x[SEED_LIMIT];
+static int seed_y[SEED_LIMIT];
+static uint16_t shore[512];
+static int shore_n = 0;
 static int grow_ms = 0;
 static int phase_live = 0;
 static uint32_t last_green = 0;
@@ -152,22 +161,18 @@ static uint8_t adjacency(uint8_t mask) {
     return (uint8_t)((mask | (uint8_t)(mask << 1) | (uint8_t)(mask >> 1)) & ALL_TILES);
 }
 
-static int tile_weight(int tile) {
-    int weight = WEIGHT[tile];
-    if (tile >= 2 && tile <= 4) {
-        weight += land_boost;
-    }
-    if (weight < 1) {
-        weight = 1;
-    }
-    return weight;
-}
-
 static int settlement_gap() {
     if (PANEL_COUNT == 4) {
         return 32;
     }
     return 16;
+}
+
+static int house_span() {
+    if (PANEL_COUNT >= 4) {
+        return 3;
+    }
+    return 2;
 }
 
 static void put(uint8_t *frame, int x, int y, int red, int green, int blue) {
@@ -185,7 +190,10 @@ static int tile_at(int x, int y) {
 }
 
 static bool passable_px(int x, int y) {
-    return tile_at(x, y) < 5;
+    if (x < 0 || y < 0 || x >= PANEL_WIDTH || y >= PANEL_HEIGHT) {
+        return false;
+    }
+    return terrain[y * PANEL_WIDTH + x] != 6;
 }
 
 static bool on_land_px(int x, int y) {
@@ -218,6 +226,283 @@ static void note_spark(int index) {
     }
 }
 
+static int lake_seed_cap() {
+    if (PANEL_COUNT >= 4) {
+        return 4;
+    }
+    if (PANEL_COUNT == 2) {
+        return 3;
+    }
+    return 2;
+}
+
+static int lake_gap() {
+    if (PANEL_COUNT >= 4) {
+        return 26;
+    }
+    if (PANEL_COUNT == 2) {
+        return 20;
+    }
+    return 16;
+}
+
+static bool water_under(int percent) {
+    return water_count * 100 < PANEL_PIXELS * percent;
+}
+
+static int touches_water(int index) {
+    int x = index % PANEL_WIDTH;
+    int y = index / PANEL_WIDTH;
+    int count = 0;
+    const int step_x[4] = {1, -1, 0, 0};
+    const int step_y[4] = {0, 0, 1, -1};
+    for (int dir = 0; dir < 4; ++dir) {
+        int nx = x + step_x[dir];
+        int ny = y + step_y[dir];
+        if (nx < 0 || ny < 0 || nx >= PANEL_WIDTH || ny >= PANEL_HEIGHT) {
+            continue;
+        }
+        uint8_t mask = terrain[ny * PANEL_WIDTH + nx];
+        if (bits_in(mask) == 1 && bit_index(mask) <= 1) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static bool near_seed(int index, int radius) {
+    int x = index % PANEL_WIDTH;
+    int y = index / PANEL_WIDTH;
+    for (int i = 0; i < seed_n; ++i) {
+        int dx = x - seed_x[i];
+        int dy = y - seed_y[i];
+        if (dx < 0) {
+            dx = -dx;
+        }
+        if (dy < 0) {
+            dy = -dy;
+        }
+        if (dx <= radius && dy <= radius) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static int shore_owner(int index) {
+    int x = index % PANEL_WIDTH;
+    int y = index / PANEL_WIDTH;
+    const int step_x[4] = {1, -1, 0, 0};
+    const int step_y[4] = {0, 0, 1, -1};
+    for (int dir = 0; dir < 4; ++dir) {
+        int nx = x + step_x[dir];
+        int ny = y + step_y[dir];
+        if (nx < 0 || ny < 0 || nx >= PANEL_WIDTH || ny >= PANEL_HEIGHT) {
+            continue;
+        }
+        int next = ny * PANEL_WIDTH + nx;
+        uint8_t mask = terrain[next];
+        if (bits_in(mask) == 1 && bit_index(mask) <= 1 && wear != nullptr && wear[next] != 0) {
+            return wear[next];
+        }
+    }
+    return 0;
+}
+
+// True when this cell sits on another lake's side of the gap between seeds.
+static bool beside_other_lake(int index, int own) {
+    if (own <= 0 || own > seed_n || seed_n < 2) {
+        return false;
+    }
+    int x = index % PANEL_WIDTH;
+    int y = index / PANEL_WIDTH;
+    int ox = x - seed_x[own - 1];
+    int oy = y - seed_y[own - 1];
+    if (ox < 0) {
+        ox = -ox;
+    }
+    if (oy < 0) {
+        oy = -oy;
+    }
+    int own_d = ox + oy;
+    for (int i = 0; i < seed_n; ++i) {
+        if (i + 1 == own) {
+            continue;
+        }
+        int dx = x - seed_x[i];
+        int dy = y - seed_y[i];
+        if (dx < 0) {
+            dx = -dx;
+        }
+        if (dy < 0) {
+            dy = -dy;
+        }
+        if (dx + dy <= own_d + 3) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void push_shore(int index) {
+    int x = index % PANEL_WIDTH;
+    int y = index / PANEL_WIDTH;
+    const int step_x[4] = {1, -1, 0, 0};
+    const int step_y[4] = {0, 0, 1, -1};
+    for (int dir = 0; dir < 4; ++dir) {
+        int nx = x + step_x[dir];
+        int ny = y + step_y[dir];
+        if (nx < 0 || ny < 0 || nx >= PANEL_WIDTH || ny >= PANEL_HEIGHT) {
+            continue;
+        }
+        int next = ny * PANEL_WIDTH + nx;
+        if (bits_in(terrain[next]) <= 1) {
+            continue;
+        }
+        if (shore_n < (int)(sizeof shore / sizeof shore[0])) {
+            shore[shore_n++] = (uint16_t)next;
+        } else {
+            shore[rnd_int(shore_n)] = (uint16_t)next;
+        }
+    }
+}
+
+// A decided water cell joins the lake it touches, or opens a new one while seeding.
+static void write_mask(int index, uint8_t narrowed) {
+    uint8_t before = terrain[index];
+    if (before == narrowed) {
+        return;
+    }
+    terrain[index] = narrowed;
+    if (bits_in(before) == 1 || bits_in(narrowed) != 1) {
+        return;
+    }
+    int tile = bit_index(narrowed);
+    if (tile > 1) {
+        return;
+    }
+    water_count++;
+    int own = shore_owner(index);
+    if (own == 0) {
+        if (seeds_closed || seed_n >= lake_seed_cap()) {
+            return;
+        }
+        seed_x[seed_n] = index % PANEL_WIDTH;
+        seed_y[seed_n] = index / PANEL_WIDTH;
+        seed_n++;
+        own = seed_n;
+        if (seed_n >= lake_seed_cap()) {
+            seeds_closed = 1;
+        }
+    }
+    if (wear != nullptr) {
+        wear[index] = (uint8_t)own;
+    }
+    push_shore(index);
+}
+
+static int find_seed_cell() {
+    int start = rnd_int(PANEL_PIXELS);
+    for (int attempt = 0; attempt < 80 + PANEL_PIXELS; ++attempt) {
+        int index = attempt < 80 ? rnd_int(PANEL_PIXELS) : start + (attempt - 80);
+        if (index >= PANEL_PIXELS) {
+            index -= PANEL_PIXELS;
+        }
+        uint8_t mask = terrain[index];
+        if (bits_in(mask) <= 1 || (mask & 3) == 0) {
+            continue;
+        }
+        if (near_seed(index, lake_gap())) {
+            continue;
+        }
+        return index;
+    }
+    return -1;
+}
+
+static int take_shore() {
+    if (!water_under(WATER_CAP_PERCENT) || shore_n <= 0) {
+        return -1;
+    }
+    for (int attempt = 0; attempt < 12 && shore_n > 0; ++attempt) {
+        int slot = rnd_int(shore_n);
+        int index = shore[slot];
+        shore[slot] = shore[--shore_n];
+        if (bits_in(terrain[index]) > 1 && (terrain[index] & 3) != 0) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+static int choose_tile(int index, uint8_t mask) {
+    int near = touches_water(index);
+    bool seeding = seeds_closed == 0 && seed_n < lake_seed_cap();
+    if (near == 0 && seeding && !near_seed(index, lake_gap())) {
+        if ((mask & 2) != 0) {
+            return 1;
+        }
+        if ((mask & 1) != 0) {
+            return 0;
+        }
+    }
+    int weight[TILES];
+    for (int tile = 0; tile < TILES; ++tile) {
+        weight[tile] = 0;
+    }
+    if (near > 0) {
+        int own = shore_owner(index);
+        bool grow = water_under(WATER_CAP_PERCENT) && own != 0 && !beside_other_lake(index, own);
+        int water_w = grow ? 8 : 0;
+        int sand_w = grow ? 2 : 6;
+        if ((mask & 2) != 0) {
+            weight[1] = water_w;
+        } else if ((mask & 1) != 0) {
+            weight[0] = water_w;
+        }
+        if ((mask & 4) != 0) {
+            weight[2] = sand_w;
+        }
+        for (int tile = 3; tile < TILES; ++tile) {
+            if ((mask & (uint8_t)(1 << tile)) != 0) {
+                weight[tile] = 1;
+            }
+        }
+    } else {
+        for (int tile = 2; tile < TILES; ++tile) {
+            if ((mask & (uint8_t)(1 << tile)) != 0) {
+                weight[tile] = 1;
+            }
+        }
+    }
+    int total = 0;
+    for (int tile = 0; tile < TILES; ++tile) {
+        total += weight[tile];
+    }
+    if (total <= 0) {
+        for (int tile = 0; tile < TILES; ++tile) {
+            if ((mask & (uint8_t)(1 << tile)) != 0) {
+                weight[tile] = 1;
+                total++;
+            }
+        }
+    }
+    if (total <= 0) {
+        return -1;
+    }
+    int ticket = rnd_int(total);
+    for (int tile = 0; tile < TILES; ++tile) {
+        if (weight[tile] == 0) {
+            continue;
+        }
+        if (ticket < weight[tile]) {
+            return tile;
+        }
+        ticket -= weight[tile];
+    }
+    return bit_index(mask);
+}
+
 static bool propagate(int start) {
     int top = 0;
     wave_stack[top++] = (uint16_t)start;
@@ -243,7 +528,7 @@ static bool propagate(int start) {
             if (narrowed == terrain[next]) {
                 continue;
             }
-            terrain[next] = narrowed;
+            write_mask(next, narrowed);
             if (top < (int)(sizeof wave_stack / sizeof wave_stack[0])) {
                 wave_stack[top++] = (uint16_t)next;
             } else {
@@ -274,7 +559,7 @@ static bool propagate(int start) {
                         return false;
                     }
                     if (narrowed != terrain[next]) {
-                        terrain[next] = narrowed;
+                        write_mask(next, narrowed);
                         changed = true;
                     }
                 }
@@ -288,6 +573,17 @@ static bool propagate(int start) {
 }
 
 static int choose_cell() {
+    if (seeds_closed == 0 && seed_n < lake_seed_cap()) {
+        int seed = find_seed_cell();
+        if (seed >= 0) {
+            return seed;
+        }
+        seeds_closed = 1;
+    }
+    int shore = take_shore();
+    if (shore >= 0) {
+        return shore;
+    }
     int best = -1;
     int best_count = 99;
     int pixels = PANEL_PIXELS;
@@ -332,28 +628,11 @@ static int collapse_one() {
     if (open <= 1) {
         return 0;
     }
-    int total = 0;
-    for (int tile = 0; tile < TILES; ++tile) {
-        if ((mask & (uint8_t)(1 << tile)) != 0) {
-            total += tile_weight(tile);
-        }
-    }
-    if (total <= 0) {
+    int pick = choose_tile(index, mask);
+    if (pick < 0) {
         return -1;
     }
-    int ticket = rnd_int(total);
-    int pick = 0;
-    for (int tile = 0; tile < TILES; ++tile) {
-        if ((mask & (uint8_t)(1 << tile)) == 0) {
-            continue;
-        }
-        ticket -= tile_weight(tile);
-        if (ticket < 0) {
-            pick = tile;
-            break;
-        }
-    }
-    terrain[index] = (uint8_t)(1 << pick);
+    write_mask(index, (uint8_t)(1 << pick));
     note_spark(index);
     if (!propagate(index)) {
         return -1;
@@ -363,15 +642,23 @@ static int collapse_one() {
 
 static void refill_masks() {
     std::memset(terrain, ALL_TILES, (size_t)PANEL_PIXELS);
+    if (wear != nullptr) {
+        std::memset(wear, 0, (size_t)PANEL_PIXELS);
+    }
     scan_cursor = 0;
+    water_count = 0;
+    seed_n = 0;
+    seeds_closed = 0;
+    shore_n = 0;
 }
 
 static bool block_room(int x, int y, int self) {
-    if (x < 0 || y < 0 || x + 1 >= PANEL_WIDTH || y + 1 >= PANEL_HEIGHT) {
+    int span = house_span();
+    if (x < 0 || y < 0 || x + span > PANEL_WIDTH || y + span > PANEL_HEIGHT) {
         return false;
     }
-    for (int dy = 0; dy < 2; ++dy) {
-        for (int dx = 0; dx < 2; ++dx) {
+    for (int dy = 0; dy < span; ++dy) {
+        for (int dx = 0; dx < span; ++dx) {
             int tile = tile_at(x + dx, y + dy);
             if (tile < 2 || tile > 4) {
                 return false;
@@ -416,15 +703,16 @@ static bool place_seed() {
         return false;
     }
     for (int attempt = 0; attempt < 80; ++attempt) {
-        int x = rnd_int(PANEL_WIDTH - 1);
-        int y = rnd_int(PANEL_HEIGHT - 1);
+        int span = house_span();
+        int x = rnd_int(PANEL_WIDTH - span + 1);
+        int y = rnd_int(PANEL_HEIGHT - span + 1);
         if (!far_from_seeds(x, y) || !block_room(x, y, -1)) {
             continue;
         }
         Village &village = villages[village_count];
         village.sx = x;
         village.sy = y;
-        village.roof = (uint8_t)rnd_int(6);
+        village.roof = (uint8_t)(village_count % ROOF_COUNT);
         village.blocks = 1;
         village.bx[0] = (uint8_t)x;
         village.by[0] = (uint8_t)y;
@@ -506,7 +794,7 @@ static void spawn_person(int index) {
     person.rest_ms = 0.0f;
     person.stuck_ms = 0.0f;
     person.best_d = 10000.0f;
-    person.horse = rnd() < (1.0f / 6.0f) ? 1 : 0;
+    person.through = 0;
     person.mode = MODE_WAIT;
     person.stop_count = 0;
     person.stop_i = 0;
@@ -527,6 +815,10 @@ static void spawn_person(int index) {
     path_i[index] = 0;
     if (person.stop_count == 0) {
         person.mode = MODE_MOVE;
+        person.rest_ms = 0.0f;
+    } else {
+        person.mode = MODE_WAIT;
+        person.rest_ms = rnd() * 5000.0f;
     }
 }
 
@@ -540,7 +832,7 @@ static bool coarse_open(int cx, int cy, int coarse_w, int coarse_h) {
         for (int dx = 0; dx < 2; ++dx) {
             int x = x0 + dx;
             int y = y0 + dy;
-            if (x < PANEL_WIDTH && y < PANEL_HEIGHT && tile_at(x, y) < 5) {
+            if (passable_px(x, y)) {
                 return true;
             }
         }
@@ -571,23 +863,100 @@ static bool seek_open(int &cx, int &cy, int coarse_w, int coarse_h) {
     return false;
 }
 
-static bool cell_anchor(int cx, int cy, int &ax, int &ay) {
+// A coarse step counts when the walker can cross the shared edge.
+// through lets the traveller cross snow to reach a settlement.
+static bool cells_touch(int ax, int ay, int bx, int by, bool through) {
+    int dx = bx - ax;
+    int dy = by - ay;
+    if (dx < 0) {
+        dx = -dx;
+    }
+    if (dy < 0) {
+        dy = -dy;
+    }
+    if (dx + dy != 1) {
+        return false;
+    }
+    if (through) {
+        return true;
+    }
+    if (bx != ax) {
+        int left = ax < bx ? ax : bx;
+        int y = ay * 2;
+        int x_left = left * 2 + 1;
+        int x_right = left * 2 + 2;
+        if (passable_px(x_left, y) && passable_px(x_right, y)) {
+            return true;
+        }
+        return passable_px(x_left, y + 1) && passable_px(x_right, y + 1);
+    }
+    int top = ay < by ? ay : by;
+    int x = ax * 2;
+    int y_top = top * 2 + 1;
+    int y_bottom = top * 2 + 2;
+    if (passable_px(x, y_top) && passable_px(x, y_bottom)) {
+        return true;
+    }
+    return passable_px(x + 1, y_top) && passable_px(x + 1, y_bottom);
+}
+
+static bool anchor_near(int cx, int cy, int px, int py, int &ax, int &ay, bool through) {
     int x0 = cx * 2;
     int y0 = cy * 2;
+    int best = 1000;
+    bool found = false;
     for (int dy = 0; dy < 2; ++dy) {
         for (int dx = 0; dx < 2; ++dx) {
             int x = x0 + dx;
             int y = y0 + dy;
-            if (x < PANEL_WIDTH && y < PANEL_HEIGHT && tile_at(x, y) < 5) {
+            if (!passable_px(x, y)) {
+                continue;
+            }
+            int ddx = x - px;
+            int ddy = y - py;
+            if (ddx < 0) {
+                ddx = -ddx;
+            }
+            if (ddy < 0) {
+                ddy = -ddy;
+            }
+            int dist = ddx + ddy;
+            if (!found || dist < best) {
+                best = dist;
                 ax = x;
                 ay = y;
-                return true;
+                found = true;
             }
         }
     }
-    ax = x0;
-    ay = y0;
-    return false;
+    if (found || !through) {
+        return found;
+    }
+    for (int dy = 0; dy < 2; ++dy) {
+        for (int dx = 0; dx < 2; ++dx) {
+            int x = x0 + dx;
+            int y = y0 + dy;
+            if (x < 0 || y < 0 || x >= PANEL_WIDTH || y >= PANEL_HEIGHT) {
+                continue;
+            }
+            int ddx = x - px;
+            int ddy = y - py;
+            if (ddx < 0) {
+                ddx = -ddx;
+            }
+            if (ddy < 0) {
+                ddy = -ddy;
+            }
+            int dist = ddx + ddy;
+            if (!found || dist < best) {
+                best = dist;
+                ax = x;
+                ay = y;
+                found = true;
+            }
+        }
+    }
+    return found;
 }
 
 static void target_of(const Person &person, float &tx, float &ty) {
@@ -599,26 +968,10 @@ static void target_of(const Person &person, float &tx, float &ty) {
     ty = (float)villages[id].sy + 0.5f;
 }
 
-static bool build_route(int index) {
-    Person &person = people[index];
-    float tx;
-    float ty;
-    target_of(person, tx, ty);
-    int coarse_w = PANEL_WIDTH / 2;
-    int coarse_h = PANEL_HEIGHT / 2;
-    int coarse_n = coarse_w * coarse_h;
-    int sx = (int)person.x / 2;
-    int sy = (int)person.y / 2;
-    int gx = (int)tx / 2;
-    int gy = (int)ty / 2;
-    if (!seek_open(sx, sy, coarse_w, coarse_h) || !seek_open(gx, gy, coarse_w, coarse_h)) {
-        return false;
-    }
+static bool route_search(int start, int goal, int coarse_w, int coarse_h, int coarse_n, bool through) {
     for (int i = 0; i < coarse_n; ++i) {
         parent[i] = 0xffff;
     }
-    int start = sy * coarse_w + sx;
-    int goal = gy * coarse_w + gx;
     parent[start] = (uint16_t)start;
     int head = 0;
     int tail = 0;
@@ -633,7 +986,10 @@ static bool build_route(int index) {
         for (int dir = 0; dir < 4; ++dir) {
             int nx = cx + step_x[dir];
             int ny = cy + step_y[dir];
-            if (!coarse_open(nx, ny, coarse_w, coarse_h)) {
+            if (nx < 0 || ny < 0 || nx >= coarse_w || ny >= coarse_h) {
+                continue;
+            }
+            if (!cells_touch(cx, cy, nx, ny, through)) {
                 continue;
             }
             int next = ny * coarse_w + nx;
@@ -648,27 +1004,99 @@ static bool build_route(int index) {
             }
         }
     }
+    return found;
+}
+
+static bool build_route(int index) {
+    Person &person = people[index];
+    float tx;
+    float ty;
+    target_of(person, tx, ty);
+    int coarse_w = PANEL_WIDTH / 2;
+    int coarse_h = PANEL_HEIGHT / 2;
+    int coarse_n = coarse_w * coarse_h;
+    int raw_sx = (int)person.x / 2;
+    int raw_sy = (int)person.y / 2;
+    int raw_gx = (int)tx / 2;
+    int raw_gy = (int)ty / 2;
+    if (raw_sx < 0) {
+        raw_sx = 0;
+    }
+    if (raw_sy < 0) {
+        raw_sy = 0;
+    }
+    if (raw_gx < 0) {
+        raw_gx = 0;
+    }
+    if (raw_gy < 0) {
+        raw_gy = 0;
+    }
+    if (raw_sx >= coarse_w) {
+        raw_sx = coarse_w - 1;
+    }
+    if (raw_sy >= coarse_h) {
+        raw_sy = coarse_h - 1;
+    }
+    if (raw_gx >= coarse_w) {
+        raw_gx = coarse_w - 1;
+    }
+    if (raw_gy >= coarse_h) {
+        raw_gy = coarse_h - 1;
+    }
+    int sx = raw_sx;
+    int sy = raw_sy;
+    int gx = raw_gx;
+    int gy = raw_gy;
+    bool through = !passable_px((int)person.x, (int)person.y);
+    bool found = false;
+    if (!through && seek_open(sx, sy, coarse_w, coarse_h) && seek_open(gx, gy, coarse_w, coarse_h)) {
+        int start = sy * coarse_w + sx;
+        int goal = gy * coarse_w + gx;
+        found = route_search(start, goal, coarse_w, coarse_h, coarse_n, false);
+    }
+    if (!found) {
+        through = true;
+        sx = raw_sx;
+        sy = raw_sy;
+        gx = raw_gx;
+        gy = raw_gy;
+        int start = sy * coarse_w + sx;
+        int goal = gy * coarse_w + gx;
+        found = route_search(start, goal, coarse_w, coarse_h, coarse_n, true);
+    }
     if (!found) {
         return false;
     }
+    person.through = through ? 1 : 0;
+    int goal = gy * coarse_w + gx;
     uint8_t ring_x[PATH_CAP];
     uint8_t ring_y[PATH_CAP];
     int writes = 0;
+    int ax = 0;
+    int ay = 0;
+    if (!anchor_near(gx, gy, (int)tx, (int)ty, ax, ay, through)) {
+        return false;
+    }
     int cur = goal;
     int guard = 0;
     while (guard++ < coarse_n) {
-        int cx = cur % coarse_w;
-        int cy = cur / coarse_w;
-        int ax;
-        int ay;
-        cell_anchor(cx, cy, ax, ay);
         ring_x[writes % PATH_CAP] = (uint8_t)ax;
         ring_y[writes % PATH_CAP] = (uint8_t)ay;
         writes++;
         if (parent[cur] == cur) {
             break;
         }
-        cur = parent[cur];
+        int prev = parent[cur];
+        int px = prev % coarse_w;
+        int py = prev / coarse_w;
+        int next_x = ax;
+        int next_y = ay;
+        if (!anchor_near(px, py, ax, ay, next_x, next_y, through)) {
+            break;
+        }
+        ax = next_x;
+        ay = next_y;
+        cur = prev;
     }
     int keep = writes < PATH_CAP ? writes : PATH_CAP;
     int base = index * PATH_CAP;
@@ -689,6 +1117,7 @@ static void advance_stop(int index) {
     Person &person = people[index];
     person.stop_i++;
     person.mode = MODE_WAIT;
+    person.rest_ms = 0.0f;
     path_n[index] = 0;
     path_i[index] = 0;
     person.best_d = 10000.0f;
@@ -701,7 +1130,7 @@ static void advance_stop(int index) {
 static void serve_routes() {
     int served = 0;
     for (int i = 0; i < person_n && served < 4; ++i) {
-        if (people[i].mode != MODE_WAIT) {
+        if (people[i].mode != MODE_WAIT || people[i].rest_ms > 0.0f) {
             continue;
         }
         served++;
@@ -739,8 +1168,45 @@ static void separate(Person &person) {
     }
 }
 
+// A traveller who has reached a settlement waits, then sets off again.
+static void begin_visit(int index) {
+    Person &person = people[index];
+    person.mode = MODE_VISIT;
+    person.through = 0;
+    person.rest_ms = rnd() * 5000.0f;
+    path_n[index] = 0;
+    path_i[index] = 0;
+    person.stuck_ms = 0.0f;
+}
+
+static bool step_open(const Person &person, int x, int y) {
+    if (x < 0 || y < 0 || x >= PANEL_WIDTH || y >= PANEL_HEIGHT) {
+        return false;
+    }
+    if (person.through) {
+        return true;
+    }
+    return tile_at(x, y) < 5;
+}
+
 static void move_person(Person &person, int index, int dt_ms) {
+    if (person.mode == MODE_VISIT) {
+        person.rest_ms -= (float)dt_ms;
+        if (person.rest_ms <= 0.0f) {
+            advance_stop(index);
+            return;
+        }
+        separate(person);
+        return;
+    }
     if (person.mode == MODE_WAIT) {
+        if (person.rest_ms > 0.0f) {
+            person.rest_ms -= (float)dt_ms;
+            if (person.rest_ms < 0.0f) {
+                person.rest_ms = 0.0f;
+            }
+            separate(person);
+        }
         return;
     }
     if (person.stop_count == 0) {
@@ -770,16 +1236,26 @@ static void move_person(Person &person, int index, int dt_ms) {
     float goal_dx = tx - person.x;
     float goal_dy = ty - person.y;
     float goal_d = sqrtf(goal_dx * goal_dx + goal_dy * goal_dy);
-    if (goal_d < 1.6f) {
-        advance_stop(index);
-        return;
-    }
-    if (person.stuck_ms > 2500.0f) {
-        advance_stop(index);
+    if (goal_d < 8.0f) {
+        begin_visit(index);
         return;
     }
     if (path_i[index] >= path_n[index]) {
+        if (goal_d < 12.0f) {
+            begin_visit(index);
+            return;
+        }
         person.mode = MODE_WAIT;
+        person.rest_ms = 0.0f;
+        return;
+    }
+    if (person.stuck_ms > 280.0f) {
+        person.stuck_ms = 0.0f;
+        path_i[index]++;
+        if (path_i[index] >= path_n[index]) {
+            person.mode = MODE_WAIT;
+            person.rest_ms = 0.0f;
+        }
         return;
     }
     int base = index * PATH_CAP + path_i[index];
@@ -790,6 +1266,7 @@ static void move_person(Person &person, int index, int dt_ms) {
     float dist = sqrtf(dx * dx + dy * dy);
     if (dist < 0.75f) {
         path_i[index]++;
+        person.stuck_ms = 0.0f;
         return;
     }
     float step = WALK_PX_PER_MS * (float)dt_ms;
@@ -802,23 +1279,54 @@ static void move_person(Person &person, int index, int dt_ms) {
     person.face_y = uy;
     float nx = person.x + ux * step;
     float ny = person.y + uy * step;
-    if (!passable_px((int)nx, (int)ny)) {
-        if (passable_px((int)nx, (int)person.y)) {
-            ny = person.y;
-        } else if (passable_px((int)person.x, (int)ny)) {
-            nx = person.x;
+    if (!step_open(person, (int)nx, (int)ny)) {
+        float slide_x = person.x + ux * step;
+        float slide_y = person.y;
+        float slide_dx = person.x;
+        float slide_dy = person.y + uy * step;
+        bool slide_ok = step_open(person, (int)slide_x, (int)slide_y);
+        bool other_ok = step_open(person, (int)slide_dx, (int)slide_dy);
+        if (slide_ok && other_ok) {
+            float left = (wx - slide_x) * (wx - slide_x) + (wy - slide_y) * (wy - slide_y);
+            float right = (wx - slide_dx) * (wx - slide_dx) + (wy - slide_dy) * (wy - slide_dy);
+            if (left <= right) {
+                nx = slide_x;
+                ny = slide_y;
+            } else {
+                nx = slide_dx;
+                ny = slide_dy;
+            }
+        } else if (slide_ok) {
+            nx = slide_x;
+            ny = slide_y;
+        } else if (other_ok) {
+            nx = slide_dx;
+            ny = slide_dy;
         } else {
             person.stuck_ms += (float)dt_ms;
             return;
         }
-    } else {
-        person.stuck_ms = 0.0f;
     }
+    float remain_x = wx - nx;
+    float remain_y = wy - ny;
+    if (remain_x * remain_x + remain_y * remain_y > dist * dist - 0.02f) {
+        person.stuck_ms += (float)dt_ms;
+        return;
+    }
+    person.stuck_ms = 0.0f;
     int ox = (int)person.x;
     int oy = (int)person.y;
     person.x = nx;
     person.y = ny;
+    float walked_x = person.x;
+    float walked_y = person.y;
     separate(person);
+    float apart_x = wx - person.x;
+    float apart_y = wy - person.y;
+    if (apart_x * apart_x + apart_y * apart_y >= dist * dist) {
+        person.x = walked_x;
+        person.y = walked_y;
+    }
     int mx = (int)person.x;
     int my = (int)person.y;
     if ((mx != ox || my != oy) && on_land_px(mx, my)) {
@@ -854,7 +1362,7 @@ static void emit_smoke(const Village &village) {
     int block = rnd_int(village.blocks);
     smoke[slot].on = true;
     smoke[slot].age = 0.0f;
-    smoke[slot].x = (float)village.bx[block] + rnd() * 2.0f;
+    smoke[slot].x = (float)village.bx[block] + rnd() * (float)house_span();
     smoke[slot].y = (float)village.by[block] - 2.4f;
 }
 
@@ -892,39 +1400,459 @@ static void simulate(int dt_ms) {
     }
 }
 
+static void deepen_lakes() {
+    for (int i = 0; i < PANEL_PIXELS; ++i) {
+        if (terrain[i] > 1) {
+            continue;
+        }
+        int x = i % PANEL_WIDTH;
+        int y = i / PANEL_WIDTH;
+        bool rim = false;
+        const int step_x[4] = {1, -1, 0, 0};
+        const int step_y[4] = {0, 0, 1, -1};
+        for (int dir = 0; dir < 4; ++dir) {
+            if (tile_at(x + step_x[dir], y + step_y[dir]) > 1) {
+                rim = true;
+                break;
+            }
+        }
+        wear[i] = rim ? 1 : 2;
+    }
+    for (int i = 0; i < PANEL_PIXELS; ++i) {
+        if (wear[i] == 1) {
+            terrain[i] = 1;
+        } else if (wear[i] == 2) {
+            terrain[i] = 0;
+        }
+    }
+    std::memset(wear, 0, (size_t)PANEL_PIXELS);
+}
+
+static int flood_body(int start, uint8_t id, int &sx, int &sy) {
+    int top = 0;
+    wear[start] = id;
+    wave_stack[top++] = (uint16_t)start;
+    sx = start % PANEL_WIDTH;
+    sy = start / PANEL_WIDTH;
+    int size = 0;
+    bool overflow = false;
+    while (top > 0) {
+        int index = wave_stack[--top];
+        size++;
+        int x = index % PANEL_WIDTH;
+        int y = index / PANEL_WIDTH;
+        const int step_x[4] = {1, -1, 0, 0};
+        const int step_y[4] = {0, 0, 1, -1};
+        for (int dir = 0; dir < 4; ++dir) {
+            int nx = x + step_x[dir];
+            int ny = y + step_y[dir];
+            if (nx < 0 || ny < 0 || nx >= PANEL_WIDTH || ny >= PANEL_HEIGHT) {
+                continue;
+            }
+            int next = ny * PANEL_WIDTH + nx;
+            if (terrain[next] > 1 || wear[next] != 0) {
+                continue;
+            }
+            if (top >= (int)(sizeof wave_stack / sizeof wave_stack[0])) {
+                overflow = true;
+                continue;
+            }
+            wear[next] = id;
+            wave_stack[top++] = (uint16_t)next;
+        }
+    }
+    if (!overflow) {
+        return size;
+    }
+    bool grew = true;
+    while (grew) {
+        grew = false;
+        for (int index = 0; index < PANEL_PIXELS; ++index) {
+            if (terrain[index] > 1 || wear[index] != 0) {
+                continue;
+            }
+            int x = index % PANEL_WIDTH;
+            int y = index / PANEL_WIDTH;
+            const int step_x[4] = {1, -1, 0, 0};
+            const int step_y[4] = {0, 0, 1, -1};
+            for (int dir = 0; dir < 4; ++dir) {
+                int nx = x + step_x[dir];
+                int ny = y + step_y[dir];
+                if (nx < 0 || ny < 0 || nx >= PANEL_WIDTH || ny >= PANEL_HEIGHT) {
+                    continue;
+                }
+                if (wear[ny * PANEL_WIDTH + nx] != id) {
+                    continue;
+                }
+                wear[index] = id;
+                size++;
+                grew = true;
+                break;
+            }
+        }
+    }
+    return size;
+}
+
+static void dissolve_pond(uint8_t id) {
+    for (int i = 0; i < PANEL_PIXELS; ++i) {
+        if (wear[i] != id) {
+            continue;
+        }
+        int x = i % PANEL_WIDTH;
+        int y = i / PANEL_WIDTH;
+        int tally[TILES];
+        for (int tile = 0; tile < TILES; ++tile) {
+            tally[tile] = 0;
+        }
+        const int step_x[4] = {1, -1, 0, 0};
+        const int step_y[4] = {0, 0, 1, -1};
+        for (int dir = 0; dir < 4; ++dir) {
+            int nx = x + step_x[dir];
+            int ny = y + step_y[dir];
+            if (nx < 0 || ny < 0 || nx >= PANEL_WIDTH || ny >= PANEL_HEIGHT) {
+                continue;
+            }
+            int next = ny * PANEL_WIDTH + nx;
+            if (wear[next] == id) {
+                continue;
+            }
+            int tile = terrain[next];
+            if (tile >= 2 && tile < TILES) {
+                tally[tile]++;
+            }
+        }
+        int best = 3;
+        int best_n = 0;
+        for (int tile = 2; tile < TILES; ++tile) {
+            if (tally[tile] > best_n) {
+                best = tile;
+                best_n = tally[tile];
+            }
+        }
+        terrain[i] = (uint8_t)best;
+    }
+}
+
+static void lay_channel(int x, int y) {
+    terrain[y * PANEL_WIDTH + x] = 1;
+    const int step_x[4] = {1, -1, 0, 0};
+    const int step_y[4] = {0, 0, 1, -1};
+    for (int dir = 0; dir < 4; ++dir) {
+        int nx = x + step_x[dir];
+        int ny = y + step_y[dir];
+        int tile = tile_at(nx, ny);
+        if (tile == 3 || tile == 4) {
+            terrain[ny * PANEL_WIDTH + nx] = 2;
+        }
+    }
+}
+
+static bool river_step(int x, int y, int tx, int ty, int &nx, int &ny) {
+    int sx = (tx > x) ? 1 : (tx < x) ? -1 : 0;
+    int sy = (ty > y) ? 1 : (ty < y) ? -1 : 0;
+    if (rnd() < 0.3f) {
+        if (sx != 0 && sy != 0) {
+            if (rnd() < 0.5f) {
+                sy = 0;
+            } else {
+                sx = 0;
+            }
+        } else if (sx != 0 && rnd() < 0.5f) {
+            sy = (rnd() < 0.5f) ? -1 : 1;
+        } else if (sy != 0 && rnd() < 0.5f) {
+            sx = (rnd() < 0.5f) ? -1 : 1;
+        }
+    }
+    const int ox[4] = {sx, sx, 0, -sy};
+    const int oy[4] = {sy, 0, sy, sx};
+    for (int i = 0; i < 4; ++i) {
+        if (ox[i] == 0 && oy[i] == 0) {
+            continue;
+        }
+        int cx = x + ox[i];
+        int cy = y + oy[i];
+        if (tile_at(cx, cy) >= 5) {
+            continue;
+        }
+        nx = cx;
+        ny = cy;
+        return true;
+    }
+    return false;
+}
+
+static bool step_onto(int x, int y, uint8_t id, int &nx, int &ny) {
+    const int step_x[4] = {1, -1, 0, 0};
+    const int step_y[4] = {0, 0, 1, -1};
+    for (int dir = 0; dir < 4; ++dir) {
+        int cx = x + step_x[dir];
+        int cy = y + step_y[dir];
+        if (cx < 0 || cy < 0 || cx >= PANEL_WIDTH || cy >= PANEL_HEIGHT) {
+            continue;
+        }
+        int next = cy * PANEL_WIDTH + cx;
+        if (wear[next] == id && terrain[next] <= 1) {
+            nx = cx;
+            ny = cy;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void carve_river(int x, int y, int tx, int ty, uint8_t src, uint8_t dest) {
+    int painted = 0;
+    int limit = (PANEL_WIDTH + PANEL_HEIGHT) * 2;
+    for (int step = 0; step < limit; ++step) {
+        int nx = x;
+        int ny = y;
+        if (step_onto(x, y, dest, nx, ny)) {
+            return;
+        }
+        if (!river_step(x, y, tx, ty, nx, ny)) {
+            return;
+        }
+        x = nx;
+        y = ny;
+        int index = y * PANEL_WIDTH + x;
+        if (terrain[index] <= 1) {
+            if (painted > 0 && wear[index] != src) {
+                return;
+            }
+            continue;
+        }
+        if (terrain[index] <= 4) {
+            lay_channel(x, y);
+            painted++;
+        }
+    }
+}
+
+struct LakeBody {
+    int size;
+    int x;
+    int y;
+    uint8_t id;
+};
+
+static bool pick_lakes(LakeBody *bodies, int body_n, int &a, int &b, int skip_a, int skip_b) {
+    for (int attempt = 0; attempt < 6; ++attempt) {
+        int i = rnd_int(body_n);
+        int j = rnd_int(body_n - 1);
+        if (j >= i) {
+            j++;
+        }
+        if ((i == skip_a && j == skip_b) || (i == skip_b && j == skip_a)) {
+            continue;
+        }
+        int dx = bodies[i].x - bodies[j].x;
+        int dy = bodies[i].y - bodies[j].y;
+        if (dx < 0) {
+            dx = -dx;
+        }
+        if (dy < 0) {
+            dy = -dy;
+        }
+        if (dx + dy < 6) {
+            continue;
+        }
+        a = i;
+        b = j;
+        return true;
+    }
+    return false;
+}
+
+static void remember_body(LakeBody *bodies, int &body_n, int size, int x, int y, uint8_t id) {
+    if (size < 12) {
+        dissolve_pond(id);
+        return;
+    }
+    if (body_n < 8) {
+        bodies[body_n].size = size;
+        bodies[body_n].x = x;
+        bodies[body_n].y = y;
+        bodies[body_n].id = id;
+        body_n++;
+        return;
+    }
+    int small = 0;
+    for (int i = 1; i < body_n; ++i) {
+        if (bodies[i].size < bodies[small].size) {
+            small = i;
+        }
+    }
+    if (size <= bodies[small].size) {
+        return;
+    }
+    bodies[small].size = size;
+    bodies[small].x = x;
+    bodies[small].y = y;
+    bodies[small].id = id;
+}
+
+// Land of three pixels or fewer that sits in the water becomes the water around it.
+static void clear_water_specks() {
+    std::memset(wear, 0, (size_t)PANEL_PIXELS);
+    const int step_x[4] = {1, -1, 0, 0};
+    const int step_y[4] = {0, 0, 1, -1};
+    int stack_cap = (int)(sizeof wave_stack / sizeof wave_stack[0]);
+    for (int start = 0; start < PANEL_PIXELS; ++start) {
+        if (terrain[start] <= 1 || wear[start] != 0) {
+            continue;
+        }
+        int cells[3];
+        int count = 0;
+        bool big = false;
+        bool overflow = false;
+        int top = 0;
+        wear[start] = 1;
+        wave_stack[top++] = (uint16_t)start;
+        while (top > 0) {
+            int index = wave_stack[--top];
+            if (count < 3) {
+                cells[count] = index;
+            } else {
+                big = true;
+            }
+            count++;
+            int x = index % PANEL_WIDTH;
+            int y = index / PANEL_WIDTH;
+            for (int dir = 0; dir < 4; ++dir) {
+                int nx = x + step_x[dir];
+                int ny = y + step_y[dir];
+                if (nx < 0 || ny < 0 || nx >= PANEL_WIDTH || ny >= PANEL_HEIGHT) {
+                    continue;
+                }
+                int next = ny * PANEL_WIDTH + nx;
+                if (terrain[next] <= 1 || wear[next] != 0) {
+                    continue;
+                }
+                if (top >= stack_cap) {
+                    overflow = true;
+                    continue;
+                }
+                wear[next] = 1;
+                wave_stack[top++] = (uint16_t)next;
+            }
+        }
+        if (overflow) {
+            bool grew = true;
+            while (grew) {
+                grew = false;
+                for (int index = 0; index < PANEL_PIXELS; ++index) {
+                    if (terrain[index] <= 1 || wear[index] != 0) {
+                        continue;
+                    }
+                    int x = index % PANEL_WIDTH;
+                    int y = index / PANEL_WIDTH;
+                    for (int dir = 0; dir < 4; ++dir) {
+                        int nx = x + step_x[dir];
+                        int ny = y + step_y[dir];
+                        if (nx < 0 || ny < 0 || nx >= PANEL_WIDTH || ny >= PANEL_HEIGHT) {
+                            continue;
+                        }
+                        if (wear[ny * PANEL_WIDTH + nx] == 0) {
+                            continue;
+                        }
+                        wear[index] = 1;
+                        grew = true;
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        if (big || count > 3 || count == 0) {
+            continue;
+        }
+        bool shallow = false;
+        bool deep = false;
+        for (int c = 0; c < count; ++c) {
+            int x = cells[c] % PANEL_WIDTH;
+            int y = cells[c] / PANEL_WIDTH;
+            for (int dir = 0; dir < 4; ++dir) {
+                int nx = x + step_x[dir];
+                int ny = y + step_y[dir];
+                if (nx < 0 || ny < 0 || nx >= PANEL_WIDTH || ny >= PANEL_HEIGHT) {
+                    continue;
+                }
+                int tile = terrain[ny * PANEL_WIDTH + nx];
+                if (tile == 1) {
+                    shallow = true;
+                } else if (tile == 0) {
+                    deep = true;
+                }
+            }
+        }
+        uint8_t fill = shallow || !deep ? 1 : 0;
+        for (int c = 0; c < count; ++c) {
+            terrain[cells[c]] = fill;
+        }
+    }
+}
+
+// Deep centres, tiny ponds fold back into the land around them, and a river
+// sometimes links two lakes. Specks of land in the water are then cleared.
+static void shape_water() {
+    if (wear == nullptr) {
+        return;
+    }
+    std::memset(wear, 0, (size_t)PANEL_PIXELS);
+    deepen_lakes();
+    LakeBody bodies[8];
+    int body_n = 0;
+    int next_id = 1;
+    for (int i = 0; i < PANEL_PIXELS && next_id < 40; ++i) {
+        if (terrain[i] > 1 || wear[i] != 0) {
+            continue;
+        }
+        int sx = 0;
+        int sy = 0;
+        int size = flood_body(i, (uint8_t)next_id, sx, sy);
+        remember_body(bodies, body_n, size, sx, sy, (uint8_t)next_id);
+        next_id++;
+    }
+    if (body_n >= 2 && rnd() < 0.7f) {
+        int rivers = 1;
+        if (body_n >= 3 && rnd() < 0.45f) {
+            rivers = 2;
+        }
+        int skip_a = -1;
+        int skip_b = -1;
+        for (int r = 0; r < rivers; ++r) {
+            int a = 0;
+            int b = 0;
+            if (!pick_lakes(bodies, body_n, a, b, skip_a, skip_b)) {
+                break;
+            }
+            carve_river(bodies[a].x, bodies[a].y, bodies[b].x, bodies[b].y, bodies[a].id, bodies[b].id);
+            skip_a = a;
+            skip_b = b;
+        }
+    }
+    clear_water_specks();
+    std::memset(wear, 0, (size_t)PANEL_PIXELS);
+}
+
 static bool finish_map() {
-    int land = 0;
     for (int i = 0; i < PANEL_PIXELS; ++i) {
         if (bits_in(terrain[i]) != 1) {
             refill_masks();
             return false;
         }
-        if (bit_index(terrain[i]) >= 2) {
-            land++;
-        }
-    }
-    if (land * 2 < PANEL_PIXELS) {
-        refill_masks();
-        if (land_boost < 20) {
-            land_boost++;
-        }
-        return false;
     }
     for (int i = 0; i < PANEL_PIXELS; ++i) {
         terrain[i] = (uint8_t)bit_index(terrain[i]);
     }
+    shape_water();
     village_count = 0;
     for (int attempt = 0; attempt < 500 && village_count < VILLAGE_CAP; ++attempt) {
         if (!place_seed()) {
             break;
         }
     }
-    if (village_count < 2 && land_boost < 14) {
-        refill_masks();
-        land_boost++;
-        return false;
-    }
-    wear = pattern_alloc(PANEL_PIXELS);
     int coarse_n = (PANEL_WIDTH / 2) * (PANEL_HEIGHT / 2);
     parent = (uint16_t *)pattern_alloc(coarse_n * (int)sizeof(uint16_t));
     bfs_queue = (uint16_t *)pattern_alloc(coarse_n * (int)sizeof(uint16_t));
@@ -959,13 +1887,6 @@ static void solve_some() {
         }
         if (result < 0) {
             refill_masks();
-            contradictions++;
-            if (contradictions >= 8) {
-                contradictions = 0;
-                if (land_boost < 20) {
-                    land_boost++;
-                }
-            }
             return;
         }
         collapses++;
@@ -984,6 +1905,32 @@ static void paint_tile(uint8_t *frame, int x, int y, int tile) {
         blue = (int)((float)blue + (96.0f - (float)blue) * worn);
     }
     put(frame, x, y, red, green, blue);
+}
+
+// The hull is a row of three and a row of two. The sail is a four pixel triangle.
+static void paint_boat(uint8_t *frame, int x, int y, float face_x, float face_y, int sail_r, int sail_g, int sail_b) {
+    int fx = 0;
+    int fy = 0;
+    if (std::fabs(face_x) >= std::fabs(face_y)) {
+        fx = face_x >= 0.0f ? 1 : -1;
+    } else {
+        fy = face_y >= 0.0f ? 1 : -1;
+    }
+    int rx = -fy;
+    int ry = fx;
+    const int along[9] = {-1, 0, 1, 0, 1, 0, -1, 0, 1};
+    const int side[9] = {0, 0, 0, 1, 1, -2, -1, -1, -1};
+    for (int i = 0; i < 9; ++i) {
+        int px = x + along[i] * fx + side[i] * rx;
+        int py = y + along[i] * fy + side[i] * ry;
+        if (i < 3) {
+            put(frame, px, py, 132, 84, 42);
+        } else if (i < 5) {
+            put(frame, px, py, 96, 58, 28);
+        } else {
+            put(frame, px, py, sail_r, sail_g, sail_b);
+        }
+    }
 }
 
 static void paint(uint8_t *frame, uint32_t anim_ms) {
@@ -1022,10 +1969,24 @@ static void paint(uint8_t *frame, uint32_t anim_ms) {
         for (int b = 0; b < villages[v].blocks; ++b) {
             int x = villages[v].bx[b];
             int y = villages[v].by[b];
-            put(frame, x, y, 86, 56, 34);
-            put(frame, x + 1, y, 86, 56, 34);
-            put(frame, x, y + 1, 62, 40, 24);
-            put(frame, x + 1, y + 1, 62, 40, 24);
+            int span = house_span();
+            for (int dy = 0; dy < span; ++dy) {
+                int red = 86;
+                int green = 56;
+                int blue = 34;
+                if (dy == span - 1) {
+                    red = 62;
+                    green = 40;
+                    blue = 24;
+                } else if (dy > 0) {
+                    red = 74;
+                    green = 48;
+                    blue = 29;
+                }
+                for (int dx = 0; dx < span; ++dx) {
+                    put(frame, x + dx, y + dy, red, green, blue);
+                }
+            }
         }
     }
     for (int v = 0; v < village_count; ++v) {
@@ -1036,7 +1997,7 @@ static void paint(uint8_t *frame, uint32_t anim_ms) {
         for (int b = 0; b < villages[v].blocks; ++b) {
             int x = villages[v].bx[b];
             int y = villages[v].by[b];
-            // Eaves hang one pixel past each wall. The row above is the ridge.
+            // The eave is four pixels wide, and the row above is the ridge.
             put(frame, x - 1, y - 1, red, green, blue);
             put(frame, x, y - 1, red, green, blue);
             put(frame, x + 1, y - 1, red, green, blue);
@@ -1074,25 +2035,15 @@ static void paint(uint8_t *frame, uint32_t anim_ms) {
             int sail_g;
             int sail_b;
             sail_rgb(roof, sail_r, sail_g, sail_b);
-            int bx = x - (int)(person.face_x * 1.2f);
-            int by = y - (int)(person.face_y * 1.2f);
-            put(frame, x, y, 132, 84, 42);
-            put(frame, bx, by, 96, 58, 28);
-            if (person.horse) {
-                put(frame, bx - (int)person.face_x, by - (int)person.face_y, 78, 46, 22);
-            }
-            put(frame, x - (int)person.face_y, y + (int)person.face_x, sail_r, sail_g, sail_b);
+            paint_boat(frame, x, y, person.face_x, person.face_y, sail_r, sail_g, sail_b);
         } else {
             int red;
             int green;
             int blue;
             roof_rgb(roof, red, green, blue);
             put(frame, x, y, red, green, blue);
-            if (person.horse) {
-                int hx = x + (int)(-person.face_y * 2.0f);
-                int hy = y + (int)(person.face_x * 2.0f);
-                put(frame, hx, hy, 196, 154, 96);
-                put(frame, hx + (int)person.face_x, hy + (int)person.face_y, 150, 112, 64);
+            if (PANEL_COUNT >= 4) {
+                put(frame, x, y - 1, red, green, blue);
             }
         }
         if (person.mode == MODE_REST) {
@@ -1108,8 +2059,6 @@ static void boot(uint32_t seed) {
     pattern_reset();
     rng_state = seed | 1u;
     phase_live = 0;
-    land_boost = 0;
-    contradictions = 0;
     village_count = 0;
     person_n = 0;
     scan_cursor = 0;
@@ -1125,6 +2074,7 @@ static void boot(uint32_t seed) {
         sparks[i].at = 0;
     }
     terrain = pattern_alloc(PANEL_PIXELS);
+    wear = pattern_alloc(PANEL_PIXELS);
     refill_masks();
 }
 
