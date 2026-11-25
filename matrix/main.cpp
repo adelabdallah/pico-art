@@ -29,7 +29,7 @@
 // The yellow band names the pattern, or the setting while settings is open.
 // Each pattern keeps its number on the right of that band. Plasma is 1. Settings, INTRO, and the reset prompts have none.
 // The blue band draws slow waves that follow the mirrors, the turn, and a slide.
-// On liquid and flow field it shows the mic and an equalizer.
+// On flow field it shows the mic and an equalizer.
 // The OLED turns off after its timer. The default is 2 minutes. A button turns it back on.
 // The dimmest contrast setting is 5 percent.
 // Button C goes to the GPIO and NO goes to ground.
@@ -44,12 +44,19 @@
 // At double speed the picture pulses, then falls off the bottom and fades back in at full speed.
 // Green GP26 turns 5 degrees clockwise. A hold spins it.
 // Blue GP22 shifts the hue by a fifth of a turn, and a hold spins it, except on settings. The shift lasts until the pattern changes.
-// On liquid and flow field, green starts and stops the microphone. Listening starts on. Yellow still adds a circle there.
+// On flow field, green starts and stops the microphone. Listening starts on. Yellow still adds a circle there.
+// On loop, green runs the generations from full speed up to double and back down again while it is held.
 // On settings, blue moves to the next value. Elsewhere blue shifts the hue. Orange and yellow stay quiet there.
 // On solar, the encoder walks from the wide view through each world and back. Green flings that world's spin, or the whole orrery on the wide view, and on Earth and Pluto it also speeds the Moon and Charon. A hold keeps the spin going.
 // Orange on a world returns to the orrery. Orange on the orrery pulls back over about two seconds to the galaxy, and the pattern changes when the picture arrives. A second press during the flight turns it around.
 // Yellow tours the orrery and each world, holding each for 5 seconds. The view tumbles slowly, and the nod is the large swing so the poles pass through the disc. Each world stays centred. The Moon and Charon speed up. Another press stops the tour. A play mark bobs on the OLED while it runs.
-// On skyline, orange moves the view up and yellow moves it down. The encoder moves the view left and right, and the view stops at the edge of the harbour.
+// On ramadan, the encoder swaps the crescent and the lanterns. Yellow walks the moon through its phases while held.
+// Orange speeds the crescent lights, or walks the lantern glass hue, while held. Green toggles medium shells at about 3 a second.
+// On autumn, orange doubles the falling leaves, yellow doubles the river, and green doubles the tree, each while held.
+// On eq, the encoder swaps the radial bars and the boombox. Orange on the boombox opens the graphic equalizer, and orange there returns.
+// On aurora, green steps the curtain hue, and a hold spins it. The lake follows the curtains.
+// On stars, louder music twinkles the stars faster and lifts them a little. The buttons keep their shared actions.
+// On civ, green pressed twice inside the double-click window solves a new map.
 // On lighthouse, ferris wheel, and galaxy, the encoder changes how fast the beam, the wheel, and the disk move. Clockwise is faster. The sea, the rim lights, and the stars keep their own pace.
 // On flow field, the encoder sets how much of the panel the streams cover. Clockwise is denser, from about 15 percent of the panel up to about 75 percent. On four panels the busy end stops where the scratch memory runs out.
 // A beat bends the field, brightens the streams, shifts their hue, and hurries them, and adds extra streams in proportion to that cover. At the busy end it adds about as many again, and they collapse. On four panels those extras appear only while room remains. The dim field keeps its light and turns with the bend.
@@ -180,17 +187,19 @@ Pattern patterns[] = {
     {"flow field", flow_start, flow_draw},
     {"voronoi cells", voronoi_start, voronoi_draw},
     {"loop", loop_start, loop_draw},
-    {"liquid", environment_start, environment_draw},
-    {"pipes", pipes_start, pipes_draw},
-    {"reef", reef_start, reef_draw},
+    {"ramadan", ramadan_start, ramadan_draw},
+    {"hearts", hearts_start, hearts_draw},
+    {"autumn", autumn_start, autumn_draw},
     {"solar", solar_start, solar_draw},
     {"campfire", campfire_start, campfire_draw},
-    {"skyline", skyline_start, skyline_draw},
+    {"eq", eq_start, eq_draw},
     {"lighthouse", lighthouse_start, lighthouse_draw},
     {"ferris wheel", ferris_start, ferris_draw},
     {"aurora", aurora_start, aurora_draw},
     {"fireworks", fireworks_start, fireworks_draw},
     {"galaxy", galaxy_start, galaxy_draw},
+    {"stars", stars_start, stars_draw},
+    {"civ", civ_start, civ_draw},
     {"settings", settings_start, settings_draw},
 };
 
@@ -203,7 +212,7 @@ constexpr uint32_t PATTERN_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 // version 0 is a record from before the settings page. Those boots keep pattern and brightness. Hue starts clear.
 // Version 5 predates the double-click window. Those boots keep the default window.
 // Version 6 predates the panel count, and it still lists reaction at index 4.
-constexpr uint32_t PATTERN_VERSION = 7;
+constexpr uint32_t PATTERN_VERSION = 9;
 
 struct SavedPattern {
     uint32_t magic;
@@ -412,6 +421,14 @@ static Settings load_settings() {
     if (saved->version < 7 && era > 4) {
         era -= 1;
     }
+    // Version 7 kept settings at 19. Stars now sits there, and settings is 20.
+    if (saved->version < 8 && era == 19) {
+        era = 20;
+    }
+    // Version 8 kept settings at 20. Civ now sits there, and settings is 21.
+    if (saved->version < 9 && era == 20) {
+        era = 21;
+    }
     if (era >= 0 && era < PATTERN_COUNT) {
         loaded.pattern = era;
     }
@@ -495,10 +512,6 @@ static void save_settings(const Settings &incoming) {
     }
 }
 
-static bool on_environment() {
-    return std::strcmp(patterns[settings.pattern].name, "liquid") == 0;
-}
-
 static bool on_settings() {
     return std::strcmp(patterns[settings.pattern].name, "settings") == 0;
 }
@@ -508,15 +521,35 @@ static bool on_flow() {
 }
 
 static bool on_mic() {
-    return on_environment() || on_flow();
+    return on_flow();
+}
+
+static bool on_loop() {
+    return std::strcmp(patterns[settings.pattern].name, "loop") == 0;
+}
+
+static bool on_ramadan() {
+    return std::strcmp(patterns[settings.pattern].name, "ramadan") == 0;
+}
+
+static bool on_autumn() {
+    return std::strcmp(patterns[settings.pattern].name, "autumn") == 0;
+}
+
+static bool on_eq() {
+    return std::strcmp(patterns[settings.pattern].name, "eq") == 0;
+}
+
+static bool on_aurora() {
+    return std::strcmp(patterns[settings.pattern].name, "aurora") == 0;
+}
+
+static bool on_civ() {
+    return std::strcmp(patterns[settings.pattern].name, "civ") == 0;
 }
 
 static bool on_solar() {
     return std::strcmp(patterns[settings.pattern].name, "solar") == 0;
-}
-
-static bool on_skyline() {
-    return std::strcmp(patterns[settings.pattern].name, "skyline") == 0;
 }
 
 static bool on_lighthouse() {
@@ -1677,12 +1710,56 @@ static void poll_button(PanelButton &button, uint32_t now) {
         }
         return;
     }
-    if (on_skyline() && (button.role == ButtonRole::Line || button.role == ButtonRole::Circle)) {
-        int dir = button.role == ButtonRole::Line ? -1 : 1;
+    if (on_loop() && button.role == ButtonRole::Spin) {
+        loop_speed_held(down);
+        return;
+    }
+    if (on_ramadan() && button.role == ButtonRole::Circle) {
+        ramadan_yellow(down);
+        return;
+    }
+    if (on_ramadan() && button.role == ButtonRole::Line) {
+        ramadan_orange(down);
+        return;
+    }
+    if (on_ramadan() && button.role == ButtonRole::Spin) {
         if (pressed) {
-            skyline_move(0, dir * 4);
+            ramadan_green();
+        }
+        return;
+    }
+    if (on_autumn() && button.role == ButtonRole::Line) {
+        autumn_leaves(down);
+        return;
+    }
+    if (on_autumn() && button.role == ButtonRole::Circle) {
+        autumn_wheat(down);
+        return;
+    }
+    if (on_autumn() && button.role == ButtonRole::Spin) {
+        autumn_tree(down);
+        return;
+    }
+    if (on_eq() && button.role == ButtonRole::Line && !eq_radial()) {
+        if (pressed) {
+            eq_zoom();
+        }
+        return;
+    }
+    if (on_civ() && button.role == ButtonRole::Spin) {
+        if (pressed) {
+            civ_green(now, settings.dbl_ms);
+        }
+        return;
+    }
+    if (on_aurora() && button.role == ButtonRole::Spin) {
+        if (pressed) {
+            aurora_hue_tap();
+        }
+        if (released) {
+            aurora_hue_spin(false);
         } else if (down && (int32_t)(now - button.pressed_at) >= HOLD_MS) {
-            skyline_move(0, dir);
+            aurora_hue_spin(true);
         }
         return;
     }
@@ -1925,6 +2002,9 @@ static void poll_encoder(uint32_t now) {
                 if (preview != settings.pattern) {
                     commit_pattern(preview);
                 } else {
+                    if (on_eq()) {
+                        eq_home();
+                    }
                     show_status();
                 }
             }
@@ -1988,10 +2068,17 @@ static void poll_encoder(uint32_t now) {
         }
         return;
     }
-    if (on_skyline()) {
+    if (on_ramadan()) {
         int steps = consume_nav(detents);
         if (steps != 0) {
-            skyline_move(steps * 8, 0);
+            ramadan_turn(steps);
+        }
+        return;
+    }
+    if (on_eq()) {
+        int steps = consume_nav(detents);
+        if (steps != 0) {
+            eq_turn(steps);
         }
         return;
     }
@@ -2174,7 +2261,7 @@ int main() {
     pattern_reset();
     patterns[settings.pattern].start();
     intro_start();
-    printf("patterns: plasma, warp, feedback, metaballs, life, flow field, voronoi cells, loop, liquid, pipes, reef, solar, campfire, skyline, lighthouse, ferris wheel, aurora, fireworks, galaxy, settings\n");
+    printf("patterns: plasma, warp, feedback, metaballs, life, flow field, voronoi cells, loop, ramadan, hearts, autumn, solar, campfire, eq, lighthouse, ferris wheel, aurora, fireworks, galaxy, stars, civ, settings\n");
     show_status();
 
     uint32_t oled_at = 0;

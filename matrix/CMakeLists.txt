@@ -42,16 +42,19 @@ add_executable(matrix
     voronoi/voronoi.cpp
     loop/loop.cpp
     environment/environment.cpp
-    pipes/pipes.cpp
-    reef/reef.cpp
+    ramadan/ramadan.cpp
+    hearts/hearts.cpp
+    autumn/autumn.cpp
     solar/solar.cpp
     campfire/campfire.cpp
-    skyline/skyline.cpp
+    eq/eq.cpp
     lighthouse/lighthouse.cpp
     ferris/ferris.cpp
     aurora/aurora.cpp
     fireworks/fireworks.cpp
     galaxy/galaxy.cpp
+    stars/stars.cpp
+    civ/civ.cpp
     settings/settings.cpp
     ${HUB75_DIR}/hub75.cpp
     ${HUB75_DIR}/fm6126a.cpp

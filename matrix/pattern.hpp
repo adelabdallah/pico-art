@@ -248,12 +248,14 @@ void voronoi_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 
 void loop_start();
 void loop_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+// Green, while held, runs generations from full speed up to double and back.
+void loop_speed_held(bool held);
 
 void environment_start();
 void environment_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 bool environment_listening();
 void environment_toggle_listen();
-// Turns the microphone on. Flow field calls this on entry, the same way liquid does.
+// Turns the microphone on. Flow field, the equalizer, and the stars call this on entry.
 void environment_arm_listen();
 // Samples the microphone when listening, and moves its clock forward by dt_ms.
 void environment_hear(int dt_ms);
@@ -274,11 +276,21 @@ void environment_set_imu_sens(int percent);
 // Copies the latest listening bands, each 0 to 1. count is capped at 8.
 void environment_bands(float *out, int count);
 
-void pipes_start();
-void pipes_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void ramadan_start();
+void ramadan_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void ramadan_turn(int steps);
+void ramadan_yellow(bool held);
+void ramadan_orange(bool held);
+void ramadan_green();
 
-void reef_start();
-void reef_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void hearts_start();
+void hearts_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+
+void autumn_start();
+void autumn_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void autumn_leaves(bool held);
+void autumn_wheat(bool held);
+void autumn_tree(bool held);
 
 void solar_start();
 void solar_ensure();
@@ -304,9 +316,12 @@ void campfire_flare_held(bool held);
 void campfire_meteor();
 void campfire_meteor_held(bool held);
 
-void skyline_start();
-void skyline_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
-void skyline_move(int dx, int dy);
+void eq_start();
+void eq_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void eq_turn(int steps);
+void eq_zoom();
+void eq_home();
+bool eq_radial();
 
 void lighthouse_start();
 void lighthouse_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
@@ -321,6 +336,15 @@ void ferris_spin(int steps);
 
 void aurora_start();
 void aurora_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void aurora_hue_tap();
+void aurora_hue_spin(bool held);
+
+void stars_start();
+void stars_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+
+void civ_start();
+void civ_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
+void civ_green(uint32_t now_ms, int window_ms);
 
 void fireworks_start();
 void fireworks_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);

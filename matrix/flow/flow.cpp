@@ -238,7 +238,7 @@ void flow_start() {
     beat_level = 0.0f;
     bend = 0.0f;
     environment_arm_listen();
-    // The arena keeps the life and reef grids first. A four panel canvas uses whatever bytes remain.
+    // A four panel canvas uses whatever bytes remain after the scan buffers.
     int cap = flow_particle_cap(PANEL_PIXELS);
     int fit = pattern_room() / (int)sizeof(Particle);
     if (cap > fit) {

@@ -94,14 +94,12 @@ void panels_apply(int count) {
     turned_buf = need_bytes(frame_bytes);
 
     int grid = 5 * PANEL_PIXELS;
-    int plate = 192 * 108 * 3;
-    int floor_bytes = grid > plate ? grid : plate;
     int flow_bytes = flow_particle_cap(PANEL_PIXELS) * FLOW_PARTICLE_BYTES;
-    int ideal = flow_bytes > floor_bytes ? flow_bytes : floor_bytes;
+    int ideal = flow_bytes > grid ? flow_bytes : grid;
     // Headers on the arena and the scan buffers, which the other core takes after this returns.
     constexpr int HEAP_SLACK = 8 * 1024;
     int room = heap_tail() - hub75_scan_bytes(PANEL_WIDTH, PANEL_HEIGHT) - HEAP_SLACK;
-    if (room < floor_bytes) {
+    if (room < grid) {
         panic("panel memory");
     }
     int need = ideal;

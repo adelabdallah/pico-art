@@ -15,8 +15,8 @@ This file follows the firmware in this directory. When a pin, a pattern, or a bu
 | DaierTek SPST rocker | On-off for the supply that feeds both panel pairs. Waterproof toggle with a red safety cover. 20 A at 125 V AC, 15 A at 250 V AC. Two pins, in the AC feed of the 5 V supply. | https://www.amazon.ca/dp/B07T6YNRZS |
 | FainWan MT3608 step-up modules | 12 V for the button LEDs. A pack of five. Each takes 2 V to 24 V in and can raise it as high as 28 V, at up to 2 A. Set the output to 12 V from the panel 5 V supply. | https://www.amazon.ca/dp/B09LM83XBF |
 | 128×64 SSD1306 OLED | Names the pattern and the open setting. The top 16 rows are the yellow band. The lower rows are blue. | I2C1, GP14 SDA, GP15 SCL, address `0x3C`. |
-| MPU-6050 | Tilt. Liquid pours with it. Galaxy tilts its disk with it. Solar looks around the orrery and around each world with it. | Same I2C bus as the OLED, address `0x68`. |
-| Analogue microphone | Loudness and pitch for liquid, and the beat for flow field. The module name is absent from the firmware. | GP27, ADC input 1. |
+| MPU-6050 | Tilt. Galaxy tilts its disk with it. Solar looks around the orrery and around each world with it. | Same I2C bus as the OLED, address `0x68`. |
+| Analogue microphone | Loudness for flow field, the equalizer, and the stars, and the beat for flow field. The module name is absent from the firmware. | GP27, ADC input 1. |
 | Five momentary buttons | Red, orange, yellow, green, and blue. Each button also has an LED on the 12 V feed above. | Each switch common goes to its GPIO. Each normally open contact goes to ground. The pin pull-up makes a press read as low. On the blue button, ground is the yellow wire. If a button behaves as if it is being held, try yellow for ground. The LEDs take 12 V from an MT3608 set to 12 V. |
 | BAOMAIN 5-pin button harness | One plug on each momentary button. The lead is 15 cm, and the ends are stripped. https://www.amazon.ca/dp/B09NN28Q1B | Red is the lamp positive, and black is the lamp negative. Green is the switch common and goes to that button's GPIO. Blue is the normally open contact and goes to ground. Yellow is the normally closed contact, closed to green while the button is up. On the blue button, ground is the yellow wire. If a button behaves as if it is being held, try yellow for ground. |
 | Quadrature encoder with a click | Pattern list, sideways fling, and the controls named per pattern below. | A is GP16, B is GP17, click is GP18. Each goes to ground. Clockwise is A changing before B. |
@@ -122,7 +122,7 @@ Mirrors, the turn, and the sideways slide belong to the pattern that was showing
 
 ## Patterns
 
-Plasma is 1. Settings, INTRO, and the reset prompts have no number. The yellow band shows the name, and the pattern number sits on the right of that band. The blue band draws slow waves that follow the mirrors, the turn, and a sideways slide. Liquid and flow field replace those waves with the microphone state and an equalizer.
+Plasma is 1. Settings, INTRO, and the reset prompts have no number. The yellow band shows the name, and the pattern number sits on the right of that band. The blue band draws slow waves that follow the mirrors, the turn, and a sideways slide. Flow field replaces those waves with the microphone state and an equalizer.
 
 | No. | Name | Picture |
 | --- | --- | --- |
@@ -133,21 +133,23 @@ Plasma is 1. Settings, INTRO, and the reset prompts have no number. The yellow b
 | 5 | life | Conway's Life on the whole panel. Colour is how long a cell has lived. A fresh board starts when the population stalls, or every 45 seconds. |
 | 6 | flow field | Particles trace a slowly turning noise field. Colour follows the direction they travel. The encoder sets how much of the panel the streams cover. A beat bends the field, brightens the streams, shifts their hue, and hurries them, and adds extra streams in proportion to the encoder. Those extra streams collapse. The dim field keeps its light and turns with the bend. |
 | 7 | voronoi cells | Fourteen drifting seeds and the regions they claim, shaded like stained glass. |
-| 8 | loop | Langton's loop. A generation that changes nothing plants the loop at a new spot. |
-| 9 | liquid | A square cup seen from above. Tilt pours a pool against the low walls and slides a web of light toward the low side. Sound spreads the pool, tints it, places a glint, and bends that web into a ring. |
-| 10 | pipes | Perspective pipes in a box. Each pipe is a shaded cylinder. The box clears when it fills. |
-| 11 | reef | Coral, rock, and open water, with fish and larger animals. Sunbeams stop when they meet rock. |
+| 8 | loop | Langton's loop. A generation that changes nothing plants the loop at a new spot. Green, while held, runs the generations from full speed up to double and back down again. |
+| 9 | ramadan | A crescent over domes, or lanterns over an arcade. The encoder swaps the two. Yellow walks the moon through its phases. |
+| 10 | hearts | Red and pink hearts of every size rise through a rose haze. |
+| 11 | autumn | Pumpkins, a hay bale, and a river at sunset, with a tree on the right. Water caustics move on the river. |
 | 12 | solar | An orrery on the wide view, and a close portrait of each world. The stops run from the wide view through the sun, the planets, the belt, and Pluto, then back. |
 | 13 | campfire | A campfire under a milky way, with a tent, a pine line, and sparks. |
-| 14 | skyline | A neon harbour on a 192 by 108 picture. The view is a window the size of the panels, and it stops at the edges. A taller chain shows the whole height and leaves the extra rows dark. |
+| 14 | eq | Radial sound bars, a chrome boombox, or a graphic equalizer. All three follow the microphone. |
 | 15 | lighthouse | A lighthouse on the rocks in a storm, its beam sweeping through the rain. |
 | 16 | ferris wheel | A lit wheel turning at dusk, with gondolas that stay upright. |
-| 17 | aurora | Three curtains, green, teal, and rose, swaying over a dark hill. |
+| 17 | aurora | Green and violet curtains over a snowy pine shore and a frozen lake. |
 | 18 | fireworks | Rockets climb over a night skyline and burst into coloured shells. Shells also launch on their own. |
 | 19 | galaxy | A tilted spiral, warm at the core and blue along two arms. The solar system sits on the outer tip of one arm. |
+| 20 | stars | A band of white, gold, and lilac stars, tiled until the panel is full. Music twinkles them faster. |
+| 21 | civ | A terrain map solved by wave function collapse, then villages, sandy paths, and travellers. |
 |  | settings | Three gears. Blue picks a stored value and the encoder raises or lowers it. |
 
-Plasma, warp, feedback, metaballs, life, voronoi cells, loop, pipes, reef, and aurora use the shared controls only.
+Plasma, warp, feedback, metaballs, life, voronoi cells, and hearts use the shared controls only.
 
 Campfire, lighthouse, ferris wheel, aurora, and fireworks keep the 64 by 64 picture at the same size. A wider chain continues the scene on both sides. A taller chain adds sky above it.
 
@@ -161,13 +163,35 @@ A beat adds extra streams in proportion to that setting. At the sparse end it ad
 
 Green starts and stops the microphone. Listening starts on. With the microphone stopped, the field holds its path and no extra streams appear. Yellow adds a round mirror. Orange still adds a diagonal mirror. Red and blue keep their shared actions.
 
-A beat bends the field. The streams leave their usual paths, and the dim field behind them turns with that bend. The bend settles in about two seconds. The same beat brightens the streams a little, shifts their hue, and hurries them, and those three ease off in about a third of a second. The dim field keeps its light. The beat is the same onset liquid uses. Microphone sensitivity is on the settings page. 50 percent is the response tuned for liquid, and flow field uses that same ear.
+A beat bends the field. The streams leave their usual paths, and the dim field behind them turns with that bend. The bend settles in about two seconds. The same beat brightens the streams a little, shifts their hue, and hurries them, and those three ease off in about a third of a second. The dim field keeps its light. The beat is the onset this pattern listens for. Microphone sensitivity is on the settings page. 50 percent is the tuned response, and flow field uses that ear.
 
-### Liquid
+### Loop
 
-Green starts and stops the microphone. Listening starts on. Yellow adds a round mirror. Orange still adds a diagonal mirror. Red, blue, and the encoder keep their shared actions.
+Green, while held, runs the generations from full speed up to double speed and back down to full speed. One trip takes about 4 seconds, and it repeats until green is released. Releasing green returns the loop to full speed. Red, orange, yellow, blue, and the encoder keep their shared actions.
 
-Tilt pours the pool and slides the light in it toward the low side. Flat and face up holds the pool in the middle, and the web drifts there on its own. A sound spreads the pool and bends the web into a ring. Microphone sensitivity and tilt sensitivity are on the settings page. 50 percent is the response tuned for this pattern.
+### Ramadan
+
+The crescent opens the pattern. One encoder step swaps to the lanterns, and the next step swaps back. The OLED name stays ramadan.
+
+Yellow, while held, walks the moon through a full set of phases in about 3 seconds, and it keeps walking until yellow is released. The moon stays on the phase it reached.
+
+Orange on the crescent, while held, runs the rooftop lights at double speed. Orange on the lanterns, while held, walks the glass hue. Releasing orange leaves that hue where it stopped. The lantern chains hang straight down, and the lanterns sway.
+
+Green toggles a shower of the medium shells from fireworks, about 3 a second, with about 10 in the sky at once. A second press stops the shower. It keeps going when the scene swaps.
+
+Two panels show the full width of either scene. One and four panels show the same square. On the crescent the moon sits in the upper right. On the lanterns the square is the middle of the scene. Red and blue keep their shared actions.
+
+### Hearts
+
+The hearts fill the panel. Red, orange, yellow, green, blue, and the encoder keep their shared actions.
+
+### Autumn
+
+Orange, while held, doubles how many leaves are falling. Yellow, while held, doubles the speed of the river. Green, while held, doubles how fast the tree canopy billows. Releasing a button returns that part to its own pace.
+
+The river runs between the far trees and the soil, in the harvest gold. The caustic web brightens that gold as it drifts with the current.
+
+Two panels show the full width. One and four panels show the square that holds the tree. Red, blue, and the encoder keep their shared actions.
 
 ### Solar
 
@@ -189,9 +213,11 @@ Tipping the panel looks around the hoops, and around a close-up the same way. Th
 
 Orange throws sparks. Yellow flares the flame. Holding either keeps that going. Green sends one comet across the milky way. Holding green keeps a meteor shower along that band, and each meteor wanders a little on its own path. At most 20 are in the sky at once. Letting go thins new meteors out over 3 seconds, and each one already crossing finishes its path. The campfire picture stays upright. Red, blue, and the encoder keep their shared actions.
 
-### Skyline
+### Eq
 
-Orange moves the view up. Yellow moves it down. A press steps a short way, and a hold keeps stepping. The encoder moves the view left and right. The view stops at the edge of the harbour. Red, green, and blue keep their shared actions.
+Selecting the pattern opens the radial bars, including when eq is already the pattern on screen. The encoder swaps those bars with the boombox. Orange on the boombox opens the graphic equalizer, and orange there returns to the boombox. The encoder waits while the equalizer is open.
+
+The boombox and the rack use shiny greys. Their bars run from cyan at the bottom to orange at the top, and the peak marks follow the bars. The radial picture keeps its rainbow. All three follow the microphone. On the radial bars, orange still adds a diagonal mirror. Red, yellow, green, and blue keep their shared actions.
 
 ### Lighthouse
 
@@ -202,6 +228,26 @@ Yellow strikes lightning. Orange thickens the rain until 240 drops are falling. 
 ### Ferris wheel
 
 The encoder changes how fast the wheel moves. Clockwise is faster. The rim lights keep their own pace. The buttons keep their shared actions.
+
+### Aurora
+
+Green steps the curtain hue by a fifth of a turn. A hold spins that hue. The lake follows the curtains. Snow, pines, and stars keep their own colours. Red, orange, yellow, blue, and the encoder keep their shared actions.
+
+Extra width continues the forest and the lake. Extra height adds sky above the picture.
+
+### Stars
+
+The star band tiles until the panel is full. Louder music twinkles the stars faster and lifts their brightness a little. Quiet music is the original twinkle. Red, orange, yellow, green, blue, and the encoder keep their shared actions.
+
+### Civ
+
+The map solves itself on the panel. Each choice narrows what the neighbouring cells can be. The tiles are deep water, shallow water, sand, grass, forest, mountain, and snow. A finished map is at least half land. Green pressed twice, inside the double-click window, solves a new map.
+
+Villages appear on sand, grass, and forest. Each village has one roof colour, red, orange, yellow, violet, cyan, or hot pink. It starts as one 2 by 2 house and gains another about every 5 minutes, up to 15, scattered around its first house. The roof is a triangle in the village colour, and the eaves hang one pixel past the walls. Villages stay 32 pixels apart on four panels, and 16 pixels apart on one or two panels. They stop growing before they meet.
+
+People leave home in that roof colour, visit up to four villages, favouring the larger ones, then return home and the trip ends. A new traveller takes their place. About one in six walks with a horse. On water they sail a brown boat with a sail in the home colour, and a cyan sail is brighter than its roof. On land they pause about once a minute for 2 seconds, and a small campfire sits beside them. They walk around mountains and snow, and they leave a one pixel gap when they pass. Repeated steps warm the ground toward sand. Villages let off a little grey and white smoke.
+
+Red, orange, yellow, blue, and the encoder keep their shared actions.
 
 ### Fireworks
 

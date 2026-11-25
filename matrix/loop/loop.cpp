@@ -2,6 +2,9 @@
 // Eight states and a rule table grow a sheath that builds a copy of the loop.
 // A generation that changes nothing clears the board and plants the loop
 // at a new spot that fits on the panel.
+// Green, while held, runs the generations from full speed up to double and
+// back down again, one trip about every 4 seconds. Releasing green returns
+// the loop to full speed.
 
 #include <cstdint>
 #include <cstring>
@@ -280,7 +283,13 @@ constexpr int SEED_WIDTH = 14;
 static uint8_t *grid[2] = {nullptr, nullptr};
 static int shown = 0;
 static int pending_ms = 0;
+static float pending_frac = 0.0f;
+static bool speed_held = false;
+static float speed_phase = 0.0f;
 static uint32_t rng = 1;
+
+// One up-and-down trip, from full speed to double and back to full speed.
+constexpr float SPEED_TRIP_MS = 4000.0f;
 
 static uint32_t next_bits() {
     rng = rng * 1664525u + 1013904223u;
@@ -378,12 +387,22 @@ static void paint_loop(uint8_t *pixels) {
     }
 }
 
+void loop_speed_held(bool held) {
+    speed_held = held;
+    if (!held) {
+        speed_phase = 0.0f;
+    }
+}
+
 void loop_start() {
     grid[0] = pattern_alloc(PANEL_PIXELS);
     grid[1] = pattern_alloc(PANEL_PIXELS);
     rule_table = pattern_alloc(8 * 8 * 8 * 8 * 8);
     rng = time_us_32() | 1u;
     pending_ms = 0;
+    pending_frac = 0.0f;
+    speed_held = false;
+    speed_phase = 0.0f;
     build_rules();
     place_seed();
 }
@@ -393,13 +412,27 @@ void loop_draw(uint8_t *pixels, uint32_t anim_ms, int dt_ms) {
     if (dt_ms < 0) {
         dt_ms = 0;
     }
-    pending_ms += dt_ms;
-    while (pending_ms >= STEP_MS) {
+    float speed = 1.0f;
+    if (speed_held && dt_ms > 0) {
+        speed_phase += (float)dt_ms / SPEED_TRIP_MS;
+        speed_phase -= floorf(speed_phase);
+        float rise = speed_phase < 0.5f ? speed_phase * 2.0f : (1.0f - speed_phase) * 2.0f;
+        speed = 1.0f + rise;
+    }
+    pending_frac += (float)dt_ms * speed;
+    int whole = (int)pending_frac;
+    pending_frac -= (float)whole;
+    pending_ms += whole;
+    int guard = 0;
+    while (pending_ms >= STEP_MS && guard < 8) {
         pending_ms -= STEP_MS;
         if (!step_loop()) {
             place_seed();
+            pending_ms = 0;
+            pending_frac = 0.0f;
             break;
         }
+        guard += 1;
     }
     paint_loop(pixels);
 }
