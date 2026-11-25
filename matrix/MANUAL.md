@@ -53,6 +53,18 @@ USB is at the top. The left column runs down the left header, and the right colu
     SCL OLED+MPU  GP15 |        |  GP16  encoder A
 ```
 
+The nRF24L01+ header, with the antenna up and the parts facing you. The square pad is ground. VCC takes 3.3 V from the Pico. IRQ stays open.
+
+```text
+                         antenna
+
+                   crystal      chip
+
+              VCC     CSN     MOSI     IRQ
+              GND     CE      SCK      MISO
+              square
+```
+
 A PiCowBell proto board's STEMMA port is tied to GP4 and GP5. Those pins are the panel's G2 and B2, so the MPU-6050 cannot use that port. Plug the sensor onto the OLED bus, GP14 and GP15, at address `0x68`. Leave the STEMMA port empty while the panels are wired, because the sensor pull-ups hold the lower half's green and blue.
 
 Four panels are powered as two pairs. Each pair takes one +V and one −V from the Velainwom supply. That pair's 5 V leads are joined to one fork, and its grounds are joined to the other. Both pairs can be on together. The Pico shares any GND pin with the supply's −V. While the pairs are still on separate HUB75 chains, each pair has its own Pico 2W, and both share that ground. The OLED and the MPU-6050 share GP14 and GP15.
@@ -119,7 +131,7 @@ Plasma is 1. Settings, INTRO, and the reset prompts have no number. The yellow b
 | 3 | feedback | Each frame samples the previous frame closer to the centre, turns it, and adds a soft spot. The picture smears into a tunnel. |
 | 4 | metaballs | Moving balls added into one field. They merge where they meet. |
 | 5 | life | Conway's Life on the whole panel. Colour is how long a cell has lived. A fresh board starts when the population stalls, or every 45 seconds. |
-| 6 | flow field | Particles trace a slowly turning noise field. Colour follows the direction they travel. A beat brightens the streams, shifts their hue, and hurries them. The dim field stays steady. |
+| 6 | flow field | Particles trace a slowly turning noise field. Colour follows the direction they travel. The encoder sets how much of the panel the streams cover. A beat bends the field, brightens the streams, shifts their hue, and hurries them, and adds extra streams in proportion to the encoder. Those extra streams collapse. The dim field keeps its light and turns with the bend. |
 | 7 | voronoi cells | Fourteen drifting seeds and the regions they claim, shaded like stained glass. |
 | 8 | loop | Langton's loop. A generation that changes nothing plants the loop at a new spot. |
 | 9 | liquid | A square cup seen from above. Tilt pours a pool against the low walls and slides a web of light toward the low side. Sound spreads the pool, tints it, places a glint, and bends that web into a ring. |
@@ -145,9 +157,11 @@ Campfire, lighthouse, ferris wheel, aurora, and fireworks keep the 64 by 64 pict
 
 The encoder sets how much of the panel the streams cover. Clockwise fills more of the panel. The sparse end covers about 15 percent. The busy end covers about 75 percent.
 
-Green starts and stops the microphone. Listening starts on. Yellow adds a round mirror. Orange still adds a diagonal mirror. Red and blue keep their shared actions.
+A beat adds extra streams in proportion to that setting. At the sparse end it adds none. At the busy end it adds about as many as are already on the panel. The extra streams finish their path and collapse back to the level the encoder set.
 
-A beat brightens the streams a little, shifts their hue, and hurries them, then all three ease back. The dim field behind them stays steady. The beat is the same onset liquid uses. Microphone sensitivity is on the settings page. 50 percent is the response tuned for liquid, and flow field uses that same ear.
+Green starts and stops the microphone. Listening starts on. With the microphone stopped, the field holds its path and no extra streams appear. Yellow adds a round mirror. Orange still adds a diagonal mirror. Red and blue keep their shared actions.
+
+A beat bends the field. The streams leave their usual paths, and the dim field behind them turns with that bend. The bend settles in about two seconds. The same beat brightens the streams a little, shifts their hue, and hurries them, and those three ease off in about a third of a second. The dim field keeps its light. The beat is the same onset liquid uses. Microphone sensitivity is on the settings page. 50 percent is the response tuned for liquid, and flow field uses that same ear.
 
 ### Liquid
 

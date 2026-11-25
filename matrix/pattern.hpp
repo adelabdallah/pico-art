@@ -85,12 +85,14 @@ inline float scene_yf(float value) {
 }
 
 // The busy flow field aims at about 75 percent of the panel, with about 6 lit pixels per particle.
+// A beat can add that many particles again, so the cap is twice the busy field.
 constexpr float FLOW_COVER_HIGH = 0.75f;
+constexpr float FLOW_BURST_HIGH = 0.75f;
 constexpr float FLOW_FOOTPRINT = 6.0f;
 constexpr int FLOW_PARTICLE_BYTES = 104;
 
 inline int flow_particle_cap(int pixels) {
-    int count = (int)((float)pixels * FLOW_COVER_HIGH / FLOW_FOOTPRINT + 0.5f);
+    int count = (int)((float)pixels * (FLOW_COVER_HIGH + FLOW_BURST_HIGH) / FLOW_FOOTPRINT + 0.5f);
     if (count < 8) {
         count = 8;
     }

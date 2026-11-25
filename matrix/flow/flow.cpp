@@ -2,8 +2,11 @@
 // The layout and the motion follow Flow Field at
 // https://www.ascii-magic.com/ascii/flow-field
 // The encoder sets how much of the panel those streams cover, from a few wisps to a busy field.
-// A beat from the microphone brightens the streams, shifts their hue, and hurries them, then all three ease back.
-// The dim field behind the streams keeps its own light.
+// A beat bends that field, so the streams leave their usual paths and the dim field turns with them.
+// The same beat adds extra streams in proportion to the encoder. At the busy end it adds about as many as are already there.
+// Those extra streams finish their path and collapse back to the level the encoder set.
+// A beat also brightens the streams, shifts their hue, and hurries them, then those three ease back.
+// The dim field keeps its own light.
 // Green starts and stops that microphone. Listening starts on.
 
 #include "pattern.hpp"
@@ -27,6 +30,11 @@ constexpr float BEAT_HUE = 0.08f;
 constexpr float BEAT_DECAY = 5.8f;
 // At the hit the streams move about three times their usual pace.
 constexpr float BEAT_RUSH = 2.4f;
+// Radians added to the field at the hit, plus a shear of the noise sample.
+constexpr float BEND_TURN = 1.7f;
+constexpr float BEND_SHEAR = 0.35f;
+// Per second. The field is home again in about two seconds.
+constexpr float BEND_DECAY = 1.35f;
 
 static const uint8_t HUE[8][3] = {
     {255, 74, 138},
@@ -56,8 +64,10 @@ static_assert(sizeof(Particle) <= FLOW_PARTICLE_BYTES, "flow particle");
 static Particle *particles = nullptr;
 static int particle_cap = 0;
 static int particle_count = 0;
+static int standing_count = 0;
 static float density = 0.0f;
 static float beat_level = 0.0f;
+static float bend = 0.0f;
 static uint32_t rng_state = 1;
 
 static float rnd() {
@@ -65,8 +75,7 @@ static float rnd() {
     return (float)(rng_state >> 8) * (1.0f / 16777216.0f);
 }
 
-static int count_for_density() {
-    float cover = COVER_LOW + (FLOW_COVER_HIGH - COVER_LOW) * density;
+static int count_for_cover(float cover) {
     int count = (int)((float)PANEL_PIXELS * cover / FLOW_FOOTPRINT + 0.5f);
     if (count < 8) {
         count = 8;
@@ -77,14 +86,71 @@ static int count_for_density() {
     return count;
 }
 
+static int count_for_density() {
+    float cover = COVER_LOW + (FLOW_COVER_HIGH - COVER_LOW) * density;
+    return count_for_cover(cover);
+}
+
+// At the low end of the encoder a beat adds none. At the busy end it adds the standing field again.
+static int burst_count() {
+    int burst = (int)((float)count_for_density() * density + 0.5f);
+    int room = particle_cap - count_for_density();
+    if (room < 0) {
+        room = 0;
+    }
+    if (burst > room) {
+        burst = room;
+    }
+    return burst;
+}
+
+static void birth(Particle &particle, int index);
+
 static float field_scale() {
     return 0.03f + density * 0.07f;
 }
 
 static float field_angle(float x, float y, float seconds) {
     float scale = field_scale();
-    float n = field_noise(x * scale + 3.0f, y * scale + seconds * 0.03f, 7);
-    return n * TAU * 2.0f + seconds * 0.12f;
+    float sx = x + (y - PANEL_HEIGHT * 0.5f) * bend * BEND_SHEAR;
+    float sy = y + (x - PANEL_WIDTH * 0.5f) * bend * BEND_SHEAR;
+    float n = field_noise(sx * scale + 3.0f, sy * scale + seconds * 0.03f, 7);
+    return n * TAU * 2.0f + seconds * 0.12f + bend * BEND_TURN;
+}
+
+// Standing streams sit in front of the extras. Thickening shifts the extras up and births the gap. Thinning drops standing streams and slides the extras down.
+static void set_standing(int want) {
+    int extras = particle_count - standing_count;
+    if (extras < 0) {
+        extras = 0;
+    }
+    if (want < standing_count) {
+        for (int i = 0; i < extras; ++i) {
+            particles[want + i] = particles[standing_count + i];
+        }
+        standing_count = want;
+        particle_count = want + extras;
+        return;
+    }
+    if (want > standing_count) {
+        int grow = want - standing_count;
+        if (standing_count + extras + grow > particle_cap) {
+            int overflow = standing_count + extras + grow - particle_cap;
+            if (overflow > extras) {
+                overflow = extras;
+            }
+            extras -= overflow;
+        }
+        for (int i = extras - 1; i >= 0; --i) {
+            particles[standing_count + grow + i] = particles[standing_count + i];
+        }
+        for (int i = standing_count; i < want; ++i) {
+            particles[i].cycle = 0;
+            birth(particles[i], i);
+        }
+        standing_count = want;
+        particle_count = want + extras;
+    }
 }
 
 static int hue_index(float angle) {
@@ -170,10 +236,12 @@ static void shift_palette(uint8_t palette[][3], float turns) {
 void flow_start() {
     density = 0.0f;
     beat_level = 0.0f;
+    bend = 0.0f;
     environment_arm_listen();
     particle_cap = flow_particle_cap(PANEL_PIXELS);
     particles = (Particle *)pattern_alloc((int)sizeof(Particle) * particle_cap);
-    particle_count = count_for_density();
+    standing_count = count_for_density();
+    particle_count = standing_count;
     rng_state = 9;
     for (int i = 0; i < particle_count; ++i) {
         particles[i].cycle = 0;
@@ -196,13 +264,7 @@ void flow_density(int steps) {
     if (density > 1.0f) {
         density = 1.0f;
     }
-    int want = count_for_density();
-    while (particle_count < want) {
-        particles[particle_count].cycle = 0;
-        birth(particles[particle_count], particle_count);
-        particle_count += 1;
-    }
-    particle_count = want;
+    set_standing(count_for_density());
 }
 
 void flow_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
@@ -222,8 +284,25 @@ void flow_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
             beat_level = 0.0f;
         }
     }
+    if (bend > 0.0f && dt_ms > 0) {
+        float bend_dt = dt_ms * 0.001f;
+        if (bend_dt > 0.2f) {
+            bend_dt = 0.2f;
+        }
+        bend *= expf(-BEND_DECAY * bend_dt);
+        if (bend < 0.02f) {
+            bend = 0.0f;
+        }
+    }
     if (environment_beat_hit()) {
         beat_level = 1.0f;
+        bend = 1.0f;
+        int want = standing_count + burst_count();
+        while (particle_count < want) {
+            particles[particle_count].cycle = 0;
+            birth(particles[particle_count], particle_count);
+            particle_count += 1;
+        }
     }
     float pace = 1.0f + BEAT_RUSH * beat_level;
     const uint8_t (*palette)[3] = HUE;
@@ -249,7 +328,16 @@ void flow_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms) {
         if (dt > 0.0f) {
             advance(particle, dt, seconds, pace);
             if (particle.age >= LIFE) {
-                birth(particle, i);
+                if (i < standing_count) {
+                    birth(particle, i);
+                } else {
+                    particle_count -= 1;
+                    if (i < particle_count) {
+                        particles[i] = particles[particle_count];
+                    }
+                    i -= 1;
+                    continue;
+                }
             }
         }
         float fade = particle.age / 0.6f;
