@@ -244,3 +244,55 @@ The values, in order:
 Panels is the chain length. 1 is one 64 by 64 panel. 2 is a 128 by 64 pair, Pico on the right, cable running left. 4 is a 128 by 128 square, Pico on the bottom right, cable left, then up, then right. The new count is stored when the encoder changes it, and the picture uses it on the next boot.
 
 The sideways fling uses each detent on its own. Encoder sensitivity does not slow that fling.
+
+## TODO
+
+The sections above match the firmware on one Pico. This section is the plan. Remove it when the plan is in the firmware, and keep the control panel layout in the manual.
+
+One Pico owns the panels and the controls, and the only free GPIO is GP28. The destination is two Pico 2Ws. The IO pico takes the console. The display pico takes the panels, runs the patterns, and draws the picture. These phases use one display pico for the whole panel chain. The pin section also describes a temporary pair of boards, one per HUB75 chain, while those chains are still apart.
+
+### Control panel
+
+The console is two rows, as you face it.
+
+```text
+[ left OLED ] [ right OLED ] [ left encoder ] [ right encoder ]
+
+[ red ] [ orange ] [ yellow ] [ green ] [ blue ]
+```
+
+With one Pico doing every job, the left OLED and the left encoder are the wired parts. The left OLED is the 128×64 SSD1306 on I2C1 at `0x3C`. The silkscreen on that module reads `0x78`, the 8-bit form of `0x3C`. The left encoder is the quadrature encoder on GP16, GP17, and GP18. The right OLED and the right encoder are part of this plan. Both OLEDs share the I2C bus. The right OLED's address jumper now reads `0x7A`. That is the 8-bit form of `0x3D`, and the firmware addresses it as `0x3D`.
+
+### Power
+
+Each Pico has its own supply. The display pico runs from a wall supply of its own. The panels stay on the Velainwom 5 V supply described under Parts. A Waveshare Pico-UPS-A is under consideration for the IO pico. That board takes a separate 14500 cell, and it reports the battery over I2C. https://www.waveshare.com/wiki/Pico-UPS-A
+
+### Phase 1
+
+The two Pico 2Ws sit side by side. A plug that comes apart joins them, and the plug includes a shared ground.
+
+The IO pico carries the left OLED, the right OLED, the left encoder, the right encoder, the five buttons, and the MPU-6050. Both OLEDs and the MPU-6050 share its I2C bus. The MPU-6050 stays at `0x68`. The right OLED and the right encoder are fitted here and take their jobs in phase 2. The display pico is wired to the panels, runs the patterns, and draws the picture. It carries the microphone.
+
+The IO pico sends each control as it happens, including a hold and a turn in progress, and it sends the tilt. The display pico sends the pattern, the open setting, and what the OLEDs should draw. The IO pico draws that on the two displays.
+
+The actions in Shared controls and Controls by pattern stay as they are through this phase. The pin diagram above stays the one-Pico map until the split is built.
+
+### Phase 2
+
+The right encoder takes the encoder actions from Shared controls and Controls by pattern. A turn flings the picture, or runs that pattern's encoder action. A click opens the pattern list. A double click opens settings. The list still ends on `RESET?`, and the confirm there stays as it is. On settings, the right encoder raises or lowers the open value, and the blue button moves to the next value.
+
+The left encoder's turn is navigation. One step selects the neighbouring stop. Encoder sensitivity groups detents into one step, as it does on the list. The stops follow the pattern list and wrap. They are the patterns, settings, the intro, and `RESET?`. Landing on a pattern or on settings selects it. Landing on the intro or on `RESET?` rests there, and the picture keeps running.
+
+The left encoder's click launches the intro when the intro is the resting stop. On `RESET?`, the first click asks `ARE YOU SURE?`, and the next click clears every pattern's mirrors, slide, and turn, and clears the hue. A turn leaves `ARE YOU SURE?` and selects the neighbouring stop. On a pattern or on settings, the click wakes. Further jobs for that click can be added later.
+
+The left OLED names the pattern, the open setting, or the stop the left encoder is resting on.
+
+The right OLED draws a miniature of the control panel for the pattern on screen. The miniature uses the two rows above. A small icon sits over each control and shows what that control does on this pattern. The yellow band names the action just used. Rotate, translate, mirror, circular mirror, launch small firework, and launch large firework are examples, and every pattern has a name for each of its actions. The name stays until another control is used. The OLED timer blanks the right OLED, and the name is there again when it wakes.
+
+On settings, the miniature shows the right encoder changing the open value and the blue button moving to the next value.
+
+The right OLED uses the same OLED timer as the left OLED. A button, a click on either encoder, or a turn of either encoder wakes the panels and both OLEDs.
+
+### Phase 3
+
+Each Pico gets an nRF24L01+. The header is the one drawn under Pins. The plug comes off, and the radios carry the same controls, the tilt, and the same OLED updates. Everything phase 2 adds, and everything the sections above this TODO describe, still works over the radios. The delay stays low enough that a turn, a press, and a hold still feel attached to the picture.
