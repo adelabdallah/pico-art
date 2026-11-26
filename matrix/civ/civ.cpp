@@ -3,8 +3,8 @@
 // https://www.ascii-magic.com/ascii/wave-function-collapse
 // The collapse plays on the panel. A few water seeds grow into lakes and seas
 // while most of the map stays land, and a river sometimes joins two lakes.
-// Villages then sit on sand, grass, and forest. People walk the land, sail the water,
-// and wear sandy paths where they repeat a route.
+// Villages then sit on sand, grass, and forest. People bow across the land,
+// sometimes sail, and wear sandy paths where they repeat a route.
 // Green pressed twice, inside the double-click window, solves a new map.
 
 #include "pattern.hpp"
@@ -23,11 +23,12 @@ constexpr int SEED_LIMIT = 4;
 constexpr int WATER_CAP_PERCENT = 24;
 constexpr int VILLAGE_CAP = 16;
 constexpr int BLOCK_CAP = 15;
-constexpr int PERSON_CAP = 36;
+constexpr int PERSON_CAP = 72;
 constexpr int PATH_CAP = 160;
 constexpr int SMOKE_CAP = 32;
 constexpr int SPARK_CAP = 12;
 constexpr float WALK_PX_PER_MS = 0.012f;
+constexpr float SAIL_CHANCE = 0.2f;
 
 constexpr int MODE_WAIT = 0;
 constexpr int MODE_MOVE = 1;
@@ -89,6 +90,13 @@ struct Smoke {
     bool on;
 };
 
+struct Camp {
+    int px;
+    int py;
+    float life;
+    bool on;
+};
+
 struct Spark {
     int index;
     uint32_t at;
@@ -106,6 +114,7 @@ static uint8_t path_i[PERSON_CAP];
 static Village villages[VILLAGE_CAP];
 static Person people[PERSON_CAP];
 static Smoke smoke[SMOKE_CAP];
+static Camp camps[PERSON_CAP];
 static Spark sparks[SPARK_CAP];
 static int spark_write = 0;
 static int village_count = 0;
@@ -189,11 +198,9 @@ static int tile_at(int x, int y) {
     return terrain[y * PANEL_WIDTH + x];
 }
 
+// Mountain and snow are open. Only the edge of the panel stops a step.
 static bool passable_px(int x, int y) {
-    if (x < 0 || y < 0 || x >= PANEL_WIDTH || y >= PANEL_HEIGHT) {
-        return false;
-    }
-    return terrain[y * PANEL_WIDTH + x] != 6;
+    return x >= 0 && y >= 0 && x < PANEL_WIDTH && y < PANEL_HEIGHT;
 }
 
 static bool on_land_px(int x, int y) {
@@ -790,7 +797,9 @@ static void spawn_person(int index) {
     person.y = (float)villages[home].sy + rnd();
     person.face_x = 1.0f;
     person.face_y = 0.0f;
-    person.quiet_ms = rnd() * 60000.0f;
+    if (person.stop_count == 0 && person.stop_i == 0 && person.quiet_ms <= 0.0f) {
+        person.quiet_ms = rnd() * 120000.0f;
+    }
     person.rest_ms = 0.0f;
     person.stuck_ms = 0.0f;
     person.best_d = 10000.0f;
@@ -864,7 +873,7 @@ static bool seek_open(int &cx, int &cy, int coarse_w, int coarse_h) {
 }
 
 // A coarse step counts when the walker can cross the shared edge.
-// through lets the traveller cross snow to reach a settlement.
+// through is the fallback when the open route cannot reach the settlement.
 static bool cells_touch(int ax, int ay, int bx, int by, bool through) {
     int dx = bx - ax;
     int dy = by - ay;
@@ -900,63 +909,45 @@ static bool cells_touch(int ax, int ay, int bx, int by, bool through) {
     return passable_px(x + 1, y_top) && passable_px(x + 1, y_bottom);
 }
 
-static bool anchor_near(int cx, int cy, int px, int py, int &ax, int &ay, bool through) {
+// Land pixels win, so a mixed cell keeps the walker on shore. Open water is the second pass.
+static bool anchor_near(int cx, int cy, int px, int py, int &ax, int &ay) {
     int x0 = cx * 2;
     int y0 = cy * 2;
-    int best = 1000;
-    bool found = false;
-    for (int dy = 0; dy < 2; ++dy) {
-        for (int dx = 0; dx < 2; ++dx) {
-            int x = x0 + dx;
-            int y = y0 + dy;
-            if (!passable_px(x, y)) {
-                continue;
-            }
-            int ddx = x - px;
-            int ddy = y - py;
-            if (ddx < 0) {
-                ddx = -ddx;
-            }
-            if (ddy < 0) {
-                ddy = -ddy;
-            }
-            int dist = ddx + ddy;
-            if (!found || dist < best) {
-                best = dist;
-                ax = x;
-                ay = y;
-                found = true;
-            }
-        }
-    }
-    if (found || !through) {
-        return found;
-    }
-    for (int dy = 0; dy < 2; ++dy) {
-        for (int dx = 0; dx < 2; ++dx) {
-            int x = x0 + dx;
-            int y = y0 + dy;
-            if (x < 0 || y < 0 || x >= PANEL_WIDTH || y >= PANEL_HEIGHT) {
-                continue;
-            }
-            int ddx = x - px;
-            int ddy = y - py;
-            if (ddx < 0) {
-                ddx = -ddx;
-            }
-            if (ddy < 0) {
-                ddy = -ddy;
-            }
-            int dist = ddx + ddy;
-            if (!found || dist < best) {
-                best = dist;
-                ax = x;
-                ay = y;
-                found = true;
+    for (int pass = 0; pass < 2; ++pass) {
+        int best = 1000;
+        bool found = false;
+        for (int dy = 0; dy < 2; ++dy) {
+            for (int dx = 0; dx < 2; ++dx) {
+                int x = x0 + dx;
+                int y = y0 + dy;
+                if (x < 0 || y < 0 || x >= PANEL_WIDTH || y >= PANEL_HEIGHT) {
+                    continue;
+                }
+                if (pass == 0 && terrain[y * PANEL_WIDTH + x] <= 1) {
+                    continue;
+                }
+                int ddx = x - px;
+                int ddy = y - py;
+                if (ddx < 0) {
+                    ddx = -ddx;
+                }
+                if (ddy < 0) {
+                    ddy = -ddy;
+                }
+                int dist = ddx + ddy;
+                if (!found || dist < best) {
+                    best = dist;
+                    ax = x;
+                    ay = y;
+                    found = true;
+                }
             }
         }
+        if (found) {
+            return true;
+        }
     }
-    return found;
+    return false;
 }
 
 static void target_of(const Person &person, float &tx, float &ty) {
@@ -966,6 +957,266 @@ static void target_of(const Person &person, float &tx, float &ty) {
     }
     tx = (float)villages[id].sx + 0.5f;
     ty = (float)villages[id].sy + 0.5f;
+}
+
+constexpr int COARSE_MAX = (PANEL_WIDTH_MAX / 2) * (PANEL_HEIGHT_MAX / 2);
+
+struct RouteBias {
+    int sx;
+    int sy;
+    int gx;
+    int gy;
+    int dx;
+    int dy;
+    int span;
+    int span2;
+    int bend;
+    int coarse_w;
+};
+
+static RouteBias route_bias;
+static uint16_t route_heap[COARSE_MAX];
+static uint16_t route_at[COARSE_MAX];
+static int route_heap_n = 0;
+
+static int water_cells(int cx, int cy) {
+    int count = 0;
+    int x0 = cx * 2;
+    int y0 = cy * 2;
+    for (int dy = 0; dy < 2; ++dy) {
+        for (int dx = 0; dx < 2; ++dx) {
+            int x = x0 + dx;
+            int y = y0 + dy;
+            if (x < 0 || y < 0 || x >= PANEL_WIDTH || y >= PANEL_HEIGHT) {
+                continue;
+            }
+            if (terrain[y * PANEL_WIDTH + x] <= 1) {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+// Distance in coarse cells from the bow. The hump is zero at both villages.
+static int bow_error(int cx, int cy) {
+    if (route_bias.span2 <= 0 || route_bias.span <= 0) {
+        return 0;
+    }
+    int rx = cx - route_bias.sx;
+    int ry = cy - route_bias.sy;
+    int along = rx * route_bias.dx + ry * route_bias.dy;
+    int t = along * 256 / route_bias.span2;
+    if (t < 0) {
+        t = 0;
+    } else if (t > 256) {
+        t = 256;
+    }
+    int hump = t * (256 - t);
+    int cross = route_bias.dx * ry - route_bias.dy * rx;
+    int left = cross * 16384;
+    int right = route_bias.bend * hump * route_bias.span;
+    int num = left - right;
+    if (num < 0) {
+        num = -num;
+    }
+    int den = route_bias.span * 16384;
+    if (den <= 0) {
+        return 0;
+    }
+    return num / den;
+}
+
+// Open water costs more than a shore, and both cost more than dry land.
+static int enter_cost(int cx, int cy) {
+    int cost = 2 + bow_error(cx, cy);
+    int water = water_cells(cx, cy);
+    if (water >= 3) {
+        cost += 40;
+    } else {
+        cost += 8 * water;
+    }
+    return cost;
+}
+
+static int step_guess(int cx, int cy) {
+    int dx = cx - route_bias.gx;
+    int dy = cy - route_bias.gy;
+    if (dx < 0) {
+        dx = -dx;
+    }
+    if (dy < 0) {
+        dy = -dy;
+    }
+    return (dx + dy) * 2;
+}
+
+static int route_rank(uint16_t cell) {
+    int cx = cell % route_bias.coarse_w;
+    int cy = cell / route_bias.coarse_w;
+    return (int)bfs_queue[cell] + step_guess(cx, cy);
+}
+
+static void heap_swap(int a, int b) {
+    uint16_t node_a = route_heap[a];
+    uint16_t node_b = route_heap[b];
+    route_heap[a] = node_b;
+    route_heap[b] = node_a;
+    route_at[node_a] = (uint16_t)b;
+    route_at[node_b] = (uint16_t)a;
+}
+
+static void heap_up(int index) {
+    while (index > 0) {
+        int parent_i = (index - 1) / 2;
+        if (route_rank(route_heap[parent_i]) <= route_rank(route_heap[index])) {
+            break;
+        }
+        heap_swap(parent_i, index);
+        index = parent_i;
+    }
+}
+
+static void heap_down(int index) {
+    while (true) {
+        int left = index * 2 + 1;
+        int right = left + 1;
+        int best = index;
+        if (left < route_heap_n && route_rank(route_heap[left]) < route_rank(route_heap[best])) {
+            best = left;
+        }
+        if (right < route_heap_n && route_rank(route_heap[right]) < route_rank(route_heap[best])) {
+            best = right;
+        }
+        if (best == index) {
+            break;
+        }
+        heap_swap(index, best);
+        index = best;
+    }
+}
+
+static bool heap_push(uint16_t cell) {
+    int at = route_at[cell];
+    if (at != 0xffff) {
+        heap_up(at);
+        return true;
+    }
+    if (route_heap_n >= COARSE_MAX) {
+        return false;
+    }
+    at = route_heap_n;
+    route_heap[at] = cell;
+    route_at[cell] = (uint16_t)at;
+    route_heap_n++;
+    heap_up(at);
+    return true;
+}
+
+static uint16_t heap_pop() {
+    uint16_t cell = route_heap[0];
+    route_at[cell] = 0xffff;
+    route_heap_n--;
+    if (route_heap_n > 0) {
+        uint16_t moved = route_heap[route_heap_n];
+        route_heap[0] = moved;
+        route_at[moved] = 0;
+        heap_down(0);
+    }
+    return cell;
+}
+
+// The bow is a hump off the straight line. Water adds cost, so the hump stays on land.
+static bool route_land(int start, int goal, int coarse_w, int coarse_h, int coarse_n, int sx, int sy, int gx, int gy) {
+    if (start == goal) {
+        parent[start] = (uint16_t)start;
+        return true;
+    }
+    int dx = gx - sx;
+    int dy = gy - sy;
+    int span2 = dx * dx + dy * dy;
+    int span = (int)sqrtf((float)span2);
+    if (span < 1) {
+        span = 1;
+    }
+    int bend = 0;
+    if (span >= 4) {
+        float mag = (float)span * (0.18f + rnd() * 0.22f);
+        if (rnd() < 0.5f) {
+            mag = -mag;
+        }
+        float perp_x = -(float)dy / (float)span;
+        float perp_y = (float)dx / (float)span;
+        float mid_x = (float)sx + (float)dx * 0.5f;
+        float mid_y = (float)sy + (float)dy * 0.5f;
+        float limit = mag;
+        for (int attempt = 0; attempt < 6; ++attempt) {
+            float apex_x = mid_x + perp_x * limit;
+            float apex_y = mid_y + perp_y * limit;
+            if (apex_x >= 1.0f && apex_y >= 1.0f && apex_x <= (float)(coarse_w - 2) && apex_y <= (float)(coarse_h - 2)) {
+                break;
+            }
+            limit *= 0.6f;
+        }
+        bend = (int)limit;
+        if (bend == 0 && (limit >= 1.0f || limit <= -1.0f)) {
+            bend = limit > 0.0f ? 1 : -1;
+        }
+    }
+    route_bias.sx = sx;
+    route_bias.sy = sy;
+    route_bias.gx = gx;
+    route_bias.gy = gy;
+    route_bias.dx = dx;
+    route_bias.dy = dy;
+    route_bias.span = span;
+    route_bias.span2 = span2;
+    route_bias.bend = bend;
+    route_bias.coarse_w = coarse_w;
+    for (int i = 0; i < coarse_n; ++i) {
+        parent[i] = 0xffff;
+        bfs_queue[i] = 0xffff;
+        route_at[i] = 0xffff;
+    }
+    route_heap_n = 0;
+    parent[start] = (uint16_t)start;
+    bfs_queue[start] = 0;
+    if (!heap_push((uint16_t)start)) {
+        return false;
+    }
+    const int step_x[4] = {1, -1, 0, 0};
+    const int step_y[4] = {0, 0, 1, -1};
+    while (route_heap_n > 0) {
+        uint16_t cell = heap_pop();
+        if ((int)cell == goal) {
+            return true;
+        }
+        int cx = cell % coarse_w;
+        int cy = cell / coarse_w;
+        int g0 = bfs_queue[cell];
+        for (int dir = 0; dir < 4; ++dir) {
+            int nx = cx + step_x[dir];
+            int ny = cy + step_y[dir];
+            if (nx < 0 || ny < 0 || nx >= coarse_w || ny >= coarse_h) {
+                continue;
+            }
+            int step = enter_cost(nx, ny);
+            int g = g0 + step;
+            if (g >= 0xffff) {
+                continue;
+            }
+            int next = ny * coarse_w + nx;
+            if (bfs_queue[next] != 0xffff && g >= (int)bfs_queue[next]) {
+                continue;
+            }
+            bfs_queue[next] = (uint16_t)g;
+            parent[next] = cell;
+            if (!heap_push((uint16_t)next)) {
+                return false;
+            }
+        }
+    }
+    return false;
 }
 
 static bool route_search(int start, int goal, int coarse_w, int coarse_h, int coarse_n, bool through) {
@@ -1047,12 +1298,14 @@ static bool build_route(int index) {
     int sy = raw_sy;
     int gx = raw_gx;
     int gy = raw_gy;
+    // About one leg in five is a sail. That search is a straight path, water included.
+    bool sailing = rnd() < SAIL_CHANCE;
     bool through = !passable_px((int)person.x, (int)person.y);
     bool found = false;
-    if (!through && seek_open(sx, sy, coarse_w, coarse_h) && seek_open(gx, gy, coarse_w, coarse_h)) {
+    if (!sailing && !through && seek_open(sx, sy, coarse_w, coarse_h) && seek_open(gx, gy, coarse_w, coarse_h)) {
         int start = sy * coarse_w + sx;
         int goal = gy * coarse_w + gx;
-        found = route_search(start, goal, coarse_w, coarse_h, coarse_n, false);
+        found = route_land(start, goal, coarse_w, coarse_h, coarse_n, sx, sy, gx, gy);
     }
     if (!found) {
         through = true;
@@ -1074,7 +1327,7 @@ static bool build_route(int index) {
     int writes = 0;
     int ax = 0;
     int ay = 0;
-    if (!anchor_near(gx, gy, (int)tx, (int)ty, ax, ay, through)) {
+    if (!anchor_near(gx, gy, (int)tx, (int)ty, ax, ay)) {
         return false;
     }
     int cur = goal;
@@ -1091,7 +1344,7 @@ static bool build_route(int index) {
         int py = prev / coarse_w;
         int next_x = ax;
         int next_y = ay;
-        if (!anchor_near(px, py, ax, ay, next_x, next_y, through)) {
+        if (!anchor_near(px, py, ax, ay, next_x, next_y)) {
             break;
         }
         ax = next_x;
@@ -1140,34 +1393,6 @@ static void serve_routes() {
     }
 }
 
-static void separate(Person &person) {
-    float push_x = 0.0f;
-    float push_y = 0.0f;
-    for (int i = 0; i < person_n; ++i) {
-        if (&people[i] == &person) {
-            continue;
-        }
-        float dx = person.x - people[i].x;
-        float dy = person.y - people[i].y;
-        float dist2 = dx * dx + dy * dy;
-        if (dist2 >= 4.0f || dist2 < 0.0001f) {
-            continue;
-        }
-        float dist = sqrtf(dist2);
-        float gap = 2.0f - dist;
-        push_x += dx / dist * gap;
-        push_y += dy / dist * gap;
-    }
-    float nx = person.x + push_x * 0.45f;
-    float ny = person.y + push_y * 0.45f;
-    if (passable_px((int)nx, (int)person.y)) {
-        person.x = nx;
-    }
-    if (passable_px((int)person.x, (int)ny)) {
-        person.y = ny;
-    }
-}
-
 // A traveller who has reached a settlement waits, then sets off again.
 static void begin_visit(int index) {
     Person &person = people[index];
@@ -1186,17 +1411,63 @@ static bool step_open(const Person &person, int x, int y) {
     if (person.through) {
         return true;
     }
-    return tile_at(x, y) < 5;
+    return passable_px(x, y);
+}
+
+// A pause comes about every two minutes, then the campfire burns for two seconds.
+static float pause_gap() {
+    return 90000.0f + rnd() * 60000.0f;
+}
+
+// The fire is painted beside the traveller and stays on the panel.
+static void light_fire(int x, int y) {
+    int slot = -1;
+    int shortest = 0;
+    for (int i = 0; i < PERSON_CAP; ++i) {
+        if (!camps[i].on) {
+            slot = i;
+            break;
+        }
+        if (camps[i].life < camps[shortest].life) {
+            shortest = i;
+        }
+    }
+    if (slot < 0) {
+        slot = shortest;
+    }
+    camps[slot].on = true;
+    camps[slot].life = 2000.0f;
+    camps[slot].px = x;
+    camps[slot].py = y;
 }
 
 static void move_person(Person &person, int index, int dt_ms) {
+    if (person.mode == MODE_REST) {
+        person.rest_ms -= (float)dt_ms;
+        if (person.rest_ms <= 0.0f) {
+            person.mode = MODE_MOVE;
+            person.quiet_ms = pause_gap();
+        }
+        return;
+    }
+    person.quiet_ms -= (float)dt_ms;
+    if (person.quiet_ms <= 0.0f) {
+        light_fire((int)person.x, (int)person.y);
+        if (person.mode == MODE_VISIT || person.mode == MODE_WAIT) {
+            person.quiet_ms = pause_gap();
+        } else {
+            person.mode = MODE_REST;
+            person.rest_ms = 2000.0f;
+            person.quiet_ms = 0.0f;
+            return;
+        }
+    }
     if (person.mode == MODE_VISIT) {
         person.rest_ms -= (float)dt_ms;
         if (person.rest_ms <= 0.0f) {
             advance_stop(index);
             return;
         }
-        separate(person);
         return;
     }
     if (person.mode == MODE_WAIT) {
@@ -1205,31 +1476,14 @@ static void move_person(Person &person, int index, int dt_ms) {
             if (person.rest_ms < 0.0f) {
                 person.rest_ms = 0.0f;
             }
-            separate(person);
         }
         return;
     }
     if (person.stop_count == 0) {
-        person.quiet_ms -= (float)dt_ms;
-        if (person.quiet_ms <= 0.0f) {
-            person.mode = MODE_REST;
-            person.rest_ms = 2000.0f;
-            person.quiet_ms = 45000.0f + rnd() * 30000.0f;
-        }
-        separate(person);
         return;
     }
     int px = (int)person.x;
     int py = (int)person.y;
-    if (person.mode == MODE_REST) {
-        person.rest_ms -= (float)dt_ms;
-        if (person.rest_ms <= 0.0f) {
-            person.mode = MODE_MOVE;
-            person.quiet_ms = 45000.0f + rnd() * 30000.0f;
-        }
-        separate(person);
-        return;
-    }
     float tx;
     float ty;
     target_of(person, tx, ty);
@@ -1318,15 +1572,6 @@ static void move_person(Person &person, int index, int dt_ms) {
     int oy = (int)person.y;
     person.x = nx;
     person.y = ny;
-    float walked_x = person.x;
-    float walked_y = person.y;
-    separate(person);
-    float apart_x = wx - person.x;
-    float apart_y = wy - person.y;
-    if (apart_x * apart_x + apart_y * apart_y >= dist * dist) {
-        person.x = walked_x;
-        person.y = walked_y;
-    }
     int mx = (int)person.x;
     int my = (int)person.y;
     if ((mx != ox || my != oy) && on_land_px(mx, my)) {
@@ -1336,15 +1581,6 @@ static void move_person(Person &person, int index, int dt_ms) {
             worn = 255;
         }
         wear[at] = (uint8_t)worn;
-    }
-    if (on_land_px(px, py)) {
-        person.quiet_ms -= (float)dt_ms;
-        if (person.quiet_ms <= 0.0f) {
-            person.mode = MODE_REST;
-            person.rest_ms = 2000.0f;
-        }
-    } else if (person.quiet_ms <= 0.0f) {
-        person.quiet_ms = 8000.0f;
     }
 }
 
@@ -1392,6 +1628,15 @@ static void simulate(int dt_ms) {
         smoke[i].y -= (float)dt_ms * 0.005f;
         if (smoke[i].age > 1.6f) {
             smoke[i].on = false;
+        }
+    }
+    for (int i = 0; i < PERSON_CAP; ++i) {
+        if (!camps[i].on) {
+            continue;
+        }
+        camps[i].life -= (float)dt_ms;
+        if (camps[i].life <= 0.0f) {
+            camps[i].on = false;
         }
     }
     serve_routes();
@@ -1858,7 +2103,7 @@ static bool finish_map() {
     bfs_queue = (uint16_t *)pattern_alloc(coarse_n * (int)sizeof(uint16_t));
     path_x = pattern_alloc(PERSON_CAP * PATH_CAP);
     path_y = pattern_alloc(PERSON_CAP * PATH_CAP);
-    person_n = 36 * PANEL_PIXELS / (128 * 128);
+    person_n = PERSON_CAP * PANEL_PIXELS / (128 * 128);
     if (person_n > PERSON_CAP) {
         person_n = PERSON_CAP;
     }
@@ -2046,11 +2291,55 @@ static void paint(uint8_t *frame, uint32_t anim_ms) {
                 put(frame, x, y - 1, red, green, blue);
             }
         }
-        if (person.mode == MODE_REST) {
-            int phase = fire_phase;
-            put(frame, x + 2, y, fire_r[phase], fire_g[phase], fire_b[phase]);
-            put(frame, x + 3, y + 1, fire_r[(phase + 1) % 3], fire_g[(phase + 1) % 3], fire_b[(phase + 1) % 3]);
-            put(frame, x + 2, y - 1, fire_r[(phase + 2) % 3], fire_g[(phase + 2) % 3], fire_b[(phase + 2) % 3]);
+    }
+    for (int i = 0; i < PERSON_CAP; ++i) {
+        if (!camps[i].on) {
+            continue;
+        }
+        int x = camps[i].px;
+        int y = camps[i].py;
+        int phase = fire_phase;
+        if (PANEL_COUNT >= 4) {
+            int dir = 1;
+            if (x + 3 >= PANEL_WIDTH) {
+                dir = -1;
+            }
+            int cx = x + 2 * dir;
+            if (cx < 1) {
+                cx = 1;
+            }
+            if (cx > PANEL_WIDTH - 2) {
+                cx = PANEL_WIDTH - 2;
+            }
+            int by = y;
+            if (by < 1) {
+                by = 1;
+            }
+            if (by >= PANEL_HEIGHT) {
+                by = PANEL_HEIGHT - 1;
+            }
+            put(frame, cx, by - 1, fire_r[phase], fire_g[phase], fire_b[phase]);
+            put(frame, cx - 1, by, fire_r[(phase + 1) % 3], fire_g[(phase + 1) % 3], fire_b[(phase + 1) % 3]);
+            put(frame, cx, by, fire_r[(phase + 2) % 3], fire_g[(phase + 2) % 3], fire_b[(phase + 2) % 3]);
+            put(frame, cx + 1, by, fire_r[phase], fire_g[phase], fire_b[phase]);
+        } else {
+            int ox = x + 2;
+            int oy = y;
+            if (ox < 0) {
+                ox = 0;
+            }
+            if (ox + 1 >= PANEL_WIDTH) {
+                ox = PANEL_WIDTH - 2;
+            }
+            if (oy - 1 < 0) {
+                oy = 1;
+            }
+            if (oy + 1 >= PANEL_HEIGHT) {
+                oy = PANEL_HEIGHT - 2;
+            }
+            put(frame, ox, oy, fire_r[phase], fire_g[phase], fire_b[phase]);
+            put(frame, ox + 1, oy + 1, fire_r[(phase + 1) % 3], fire_g[(phase + 1) % 3], fire_b[(phase + 1) % 3]);
+            put(frame, ox, oy - 1, fire_r[(phase + 2) % 3], fire_g[(phase + 2) % 3], fire_b[(phase + 2) % 3]);
         }
     }
 }
@@ -2072,6 +2361,9 @@ static void boot(uint32_t seed) {
     for (int i = 0; i < SPARK_CAP; ++i) {
         sparks[i].index = -1;
         sparks[i].at = 0;
+    }
+    for (int i = 0; i < PERSON_CAP; ++i) {
+        camps[i].on = false;
     }
     terrain = pattern_alloc(PANEL_PIXELS);
     wear = pattern_alloc(PANEL_PIXELS);
