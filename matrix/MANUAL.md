@@ -147,9 +147,10 @@ Plasma is 1. Settings, INTRO, and the reset prompts have no number. The yellow b
 | 19 | galaxy | A tilted spiral, warm at the core and blue along two arms. The solar system sits on the outer tip of one arm. |
 | 20 | stars | A band of white, gold, and lilac stars, tiled until the panel is full. Music twinkles them faster. |
 | 21 | civ | A terrain map solved by wave function collapse, then villages, sandy paths, and travellers. |
+| 22 | boids | A meadow with a flock of pale birds. They steer together, split when a hawk dives through, and regroup. |
 |  | settings | Three gears. Blue picks a stored value and the encoder raises or lowers it. |
 
-Plasma, warp, feedback, metaballs, life, voronoi cells, and hearts use the shared controls only.
+Plasma, warp, feedback, metaballs, life, voronoi cells, hearts, and boids use the shared controls only.
 
 Campfire, lighthouse, ferris wheel, aurora, and fireworks keep the 64 by 64 picture at the same size. A wider chain continues the scene on both sides. A taller chain adds sky above it.
 
@@ -248,6 +249,10 @@ Villages appear on sand, grass, and forest. Each village has one roof colour, ta
 People leave home in that roof colour, visit up to four villages, favouring the larger ones, then return home and the trip ends. They stay at a settlement for up to 5 seconds before they leave, and a new traveller takes their place. On four panels a person is 2 pixels tall. On water they sail a brown boat, a row of three pixels and a row of two, with a four pixel triangular sail in the home colour. A cyan sail is brighter than its roof. They pause about once every two minutes for 2 seconds, and a campfire always appears beside them, on water, mountain, or snow the same as on land. On four panels that campfire is one pixel centered on three. Travellers walk through a campfire, across snow, and through each other. A route bows across the land and walks around water. About one leg in five is a sail, and that crossing runs straighter, water included. Repeated steps warm the ground toward sand. Villages let off a little grey and white smoke.
 
 Red, orange, yellow, blue, and the encoder keep their shared actions.
+
+### Boids
+
+The meadow fills the panel. Pale birds steer together and leave a short cyan trail. An orange hawk dives through, the flock splits, and then it regroups. The flock starts again every minute. Red, orange, yellow, green, blue, and the encoder keep their shared actions.
 
 ### Fireworks
 

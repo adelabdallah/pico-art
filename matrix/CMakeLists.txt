@@ -55,6 +55,7 @@ add_executable(matrix
     galaxy/galaxy.cpp
     stars/stars.cpp
     civ/civ.cpp
+    boids/boids.cpp
     settings/settings.cpp
     ${HUB75_DIR}/hub75.cpp
     ${HUB75_DIR}/fm6126a.cpp

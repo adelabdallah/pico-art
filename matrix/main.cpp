@@ -200,6 +200,7 @@ Pattern patterns[] = {
     {"galaxy", galaxy_start, galaxy_draw},
     {"stars", stars_start, stars_draw},
     {"civ", civ_start, civ_draw},
+    {"boids", boids_start, boids_draw},
     {"settings", settings_start, settings_draw},
 };
 
@@ -212,7 +213,7 @@ constexpr uint32_t PATTERN_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 // version 0 is a record from before the settings page. Those boots keep pattern and brightness. Hue starts clear.
 // Version 5 predates the double-click window. Those boots keep the default window.
 // Version 6 predates the panel count, and it still lists reaction at index 4.
-constexpr uint32_t PATTERN_VERSION = 9;
+constexpr uint32_t PATTERN_VERSION = 10;
 
 struct SavedPattern {
     uint32_t magic;
@@ -428,6 +429,10 @@ static Settings load_settings() {
     // Version 8 kept settings at 20. Civ now sits there, and settings is 21.
     if (saved->version < 9 && era == 20) {
         era = 21;
+    }
+    // Version 9 kept settings at 21. Boids now sits there, and settings is 22.
+    if (saved->version < 10 && era == 21) {
+        era = 22;
     }
     if (era >= 0 && era < PATTERN_COUNT) {
         loaded.pattern = era;
@@ -2261,7 +2266,7 @@ int main() {
     pattern_reset();
     patterns[settings.pattern].start();
     intro_start();
-    printf("patterns: plasma, warp, feedback, metaballs, life, flow field, voronoi cells, loop, ramadan, hearts, autumn, solar, campfire, eq, lighthouse, ferris wheel, aurora, fireworks, galaxy, stars, civ, settings\n");
+    printf("patterns: plasma, warp, feedback, metaballs, life, flow field, voronoi cells, loop, ramadan, hearts, autumn, solar, campfire, eq, lighthouse, ferris wheel, aurora, fireworks, galaxy, stars, civ, boids, settings\n");
     show_status();
 
     uint32_t oled_at = 0;
