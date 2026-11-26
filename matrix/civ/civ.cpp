@@ -6,6 +6,7 @@
 // Villages then sit on sand, grass, and forest. People bow across the land,
 // sometimes sail, and wear sandy paths where they repeat a route.
 // Green pressed twice, inside the double-click window, solves a new map.
+// Yellow brings night. Another press brings the day back.
 
 #include "pattern.hpp"
 
@@ -129,6 +130,7 @@ static uint16_t shore[512];
 static int shore_n = 0;
 static int grow_ms = 0;
 static int phase_live = 0;
+static bool night = false;
 static uint32_t last_green = 0;
 static uint16_t wave_stack[1536];
 
@@ -1630,6 +1632,18 @@ static void simulate(int dt_ms) {
             smoke[i].on = false;
         }
     }
+    if (night) {
+        for (int i = 0; i < person_n; ++i) {
+            camps[i].on = true;
+            camps[i].life = 2000.0f;
+            camps[i].px = (int)people[i].x;
+            camps[i].py = (int)people[i].y;
+        }
+        for (int i = person_n; i < PERSON_CAP; ++i) {
+            camps[i].on = false;
+        }
+        return;
+    }
     for (int i = 0; i < PERSON_CAP; ++i) {
         if (!camps[i].on) {
             continue;
@@ -2178,6 +2192,45 @@ static void paint_boat(uint8_t *frame, int x, int y, float face_x, float face_y,
     }
 }
 
+// Night keeps a dim navy cast. Windows and campfires are painted after this.
+static void night_cast(uint8_t *frame) {
+    for (int i = 0; i < PANEL_PIXELS; ++i) {
+        uint8_t *pixel = frame + i * 3;
+        int blue = pixel[0];
+        int green = pixel[1];
+        int red = pixel[2];
+        red = (int)((float)red * 0.18f + 4.0f);
+        green = (int)((float)green * 0.22f + 10.0f);
+        blue = (int)((float)blue * 0.48f + 28.0f);
+        if (red > 255) {
+            red = 255;
+        }
+        if (green > 255) {
+            green = 255;
+        }
+        if (blue > 255) {
+            blue = 255;
+        }
+        pixel[0] = (uint8_t)blue;
+        pixel[1] = (uint8_t)green;
+        pixel[2] = (uint8_t)red;
+    }
+}
+
+// A slow glow in one hue, so a window is not a flame.
+static void paint_windows(uint8_t *frame, uint32_t anim_ms) {
+    int span = house_span();
+    int ox = span >= 3 ? 1 : 0;
+    for (int v = 0; v < village_count; ++v) {
+        for (int b = 0; b < villages[v].blocks; ++b) {
+            int shift = (v * 5 + b * 3) * 180;
+            float wave = sinf(((float)anim_ms + (float)shift) * 0.0026f);
+            float glow = 0.38f + (wave + 1.0f) * 0.31f;
+            put(frame, villages[v].bx[b] + ox, villages[v].by[b], (int)(255.0f * glow), (int)(188.0f * glow), (int)(36.0f * glow));
+        }
+    }
+}
+
 static void paint(uint8_t *frame, uint32_t anim_ms) {
     for (int y = 0; y < PANEL_HEIGHT; ++y) {
         for (int x = 0; x < PANEL_WIDTH; ++x) {
@@ -2207,6 +2260,9 @@ static void paint(uint8_t *frame, uint32_t anim_ms) {
                 int index = sparks[s].index;
                 put(frame, index % PANEL_WIDTH, index / PANEL_WIDTH, 255, 236, 170);
             }
+        }
+        if (night) {
+            night_cast(frame);
         }
         return;
     }
@@ -2292,6 +2348,10 @@ static void paint(uint8_t *frame, uint32_t anim_ms) {
             }
         }
     }
+    if (night) {
+        night_cast(frame);
+        paint_windows(frame, anim_ms);
+    }
     for (int i = 0; i < PERSON_CAP; ++i) {
         if (!camps[i].on) {
             continue;
@@ -2348,6 +2408,7 @@ static void boot(uint32_t seed) {
     pattern_reset();
     rng_state = seed | 1u;
     phase_live = 0;
+    night = false;
     village_count = 0;
     person_n = 0;
     scan_cursor = 0;
@@ -2371,6 +2432,16 @@ static void boot(uint32_t seed) {
 }
 
 }  // namespace
+
+void civ_yellow() {
+    night = !night;
+    if (night) {
+        return;
+    }
+    for (int i = 0; i < PERSON_CAP; ++i) {
+        camps[i].on = false;
+    }
+}
 
 void civ_green(uint32_t now_ms, int window_ms) {
     if (last_green != 0 && (int)(now_ms - last_green) > 40 && (int)(now_ms - last_green) <= window_ms) {

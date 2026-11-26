@@ -345,6 +345,7 @@ void stars_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 void civ_start();
 void civ_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);
 void civ_green(uint32_t now_ms, int window_ms);
+void civ_yellow();
 
 void boids_start();
 void boids_draw(uint8_t *frame, uint32_t anim_ms, int dt_ms);

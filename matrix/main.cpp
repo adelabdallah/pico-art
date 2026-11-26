@@ -1757,6 +1757,12 @@ static void poll_button(PanelButton &button, uint32_t now) {
         }
         return;
     }
+    if (on_civ() && button.role == ButtonRole::Circle) {
+        if (pressed) {
+            civ_yellow();
+        }
+        return;
+    }
     if (on_aurora() && button.role == ButtonRole::Spin) {
         if (pressed) {
             aurora_hue_tap();

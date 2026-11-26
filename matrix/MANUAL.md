@@ -248,7 +248,7 @@ Villages appear on sand, grass, and forest. Each village has one roof colour, ta
 
 People leave home in that roof colour, visit up to four villages, favouring the larger ones, then return home and the trip ends. They stay at a settlement for up to 5 seconds before they leave, and a new traveller takes their place. On four panels a person is 2 pixels tall. On water they sail a brown boat, a row of three pixels and a row of two, with a four pixel triangular sail in the home colour. A cyan sail is brighter than its roof. They pause about once every two minutes for 2 seconds, and a campfire always appears beside them, on water, mountain, or snow the same as on land. On four panels that campfire is one pixel centered on three. Travellers walk through a campfire, across snow, and through each other. A route bows across the land and walks around water. About one leg in five is a sail, and that crossing runs straighter, water included. Repeated steps warm the ground toward sand. Villages let off a little grey and white smoke.
 
-Red, orange, yellow, blue, and the encoder keep their shared actions.
+Yellow brings night. Each house lights one orange-yellow window, dimming and brightening over a couple of seconds. Travellers stop where they are and keep a campfire. The land, water, and buildings take a navy cast. The windows and the fires keep their own colour. Another press brings the day back. Red, orange, blue, and the encoder keep their shared actions.
 
 ### Boids
 
