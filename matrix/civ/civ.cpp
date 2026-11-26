@@ -25,6 +25,7 @@ constexpr int WATER_CAP_PERCENT = 24;
 constexpr int VILLAGE_CAP = 16;
 constexpr int BLOCK_CAP = 15;
 constexpr int PERSON_CAP = 72;
+constexpr uint32_t CROWD_FULL_MS = 15u * 60u * 1000u;
 constexpr int PATH_CAP = 160;
 constexpr int SMOKE_CAP = 32;
 constexpr int SPARK_CAP = 12;
@@ -129,6 +130,7 @@ static int seed_y[SEED_LIMIT];
 static uint16_t shore[512];
 static int shore_n = 0;
 static int grow_ms = 0;
+static uint32_t live_ms = 0;
 static int phase_live = 0;
 static bool night = false;
 static uint32_t last_green = 0;
@@ -1604,6 +1606,43 @@ static void emit_smoke(const Village &village) {
     smoke[slot].y = (float)village.by[block] - 2.4f;
 }
 
+static int crowd_full() {
+    int full = PERSON_CAP * PANEL_PIXELS / (128 * 128);
+    if (full > PERSON_CAP) {
+        full = PERSON_CAP;
+    }
+    if (full < 1) {
+        full = 1;
+    }
+    return full;
+}
+
+// One traveller per village at first. The full crowd is out after 15 minutes.
+static int crowd_now(uint32_t age_ms) {
+    int full = crowd_full();
+    if (village_count <= 0) {
+        return 0;
+    }
+    int start = village_count;
+    if (start > full) {
+        start = full;
+    }
+    if (age_ms >= CROWD_FULL_MS) {
+        return full;
+    }
+    int span = full - start;
+    int grown = (int)((uint64_t)span * age_ms / CROWD_FULL_MS);
+    return start + grown;
+}
+
+static void admit_people(uint32_t age_ms) {
+    int want = crowd_now(age_ms);
+    while (person_n < want && person_n < PERSON_CAP) {
+        spawn_person(person_n);
+        person_n++;
+    }
+}
+
 static void simulate(int dt_ms) {
     grow_ms += dt_ms;
     while (grow_ms >= 1000) {
@@ -1614,6 +1653,13 @@ static void simulate(int dt_ms) {
             }
         }
     }
+    if (live_ms < CROWD_FULL_MS) {
+        live_ms += (uint32_t)dt_ms;
+        if (live_ms > CROWD_FULL_MS) {
+            live_ms = CROWD_FULL_MS;
+        }
+    }
+    admit_people(live_ms);
     for (int v = 0; v < village_count; ++v) {
         int due = villages[v].smoke_ms + dt_ms;
         if (due >= 2600) {
@@ -2117,16 +2163,9 @@ static bool finish_map() {
     bfs_queue = (uint16_t *)pattern_alloc(coarse_n * (int)sizeof(uint16_t));
     path_x = pattern_alloc(PERSON_CAP * PATH_CAP);
     path_y = pattern_alloc(PERSON_CAP * PATH_CAP);
-    person_n = PERSON_CAP * PANEL_PIXELS / (128 * 128);
-    if (person_n > PERSON_CAP) {
-        person_n = PERSON_CAP;
-    }
-    if (village_count == 0) {
-        person_n = 0;
-    }
-    for (int i = 0; i < person_n; ++i) {
-        spawn_person(i);
-    }
+    live_ms = 0;
+    person_n = 0;
+    admit_people(0);
     for (int i = 0; i < SMOKE_CAP; ++i) {
         smoke[i].on = false;
     }
@@ -2215,6 +2254,20 @@ static void night_cast(uint8_t *frame) {
         pixel[1] = (uint8_t)green;
         pixel[2] = (uint8_t)red;
     }
+}
+
+// A night fire fades for several seconds, then flares, as its keeper tends it.
+static float night_fire_glow(uint32_t anim_ms, int index) {
+    uint32_t clock = (anim_ms + (uint32_t)index * 900u) % 5700u;
+    if (clock < 5200u) {
+        return 1.0f - (float)clock / 5200.0f * 0.62f;
+    }
+    float rise = (float)(clock - 5200u) / 500.0f;
+    return 0.38f + rise * 0.62f;
+}
+
+static void put_flame(uint8_t *frame, int x, int y, int red, int green, int blue, float glow) {
+    put(frame, x, y, (int)((float)red * glow), (int)((float)green * glow), (int)((float)blue * glow));
 }
 
 // A slow glow in one hue, so a window is not a flame.
@@ -2359,6 +2412,7 @@ static void paint(uint8_t *frame, uint32_t anim_ms) {
         int x = camps[i].px;
         int y = camps[i].py;
         int phase = fire_phase;
+        float glow = night ? night_fire_glow(anim_ms, i) : 1.0f;
         if (PANEL_COUNT >= 4) {
             int dir = 1;
             if (x + 3 >= PANEL_WIDTH) {
@@ -2378,10 +2432,10 @@ static void paint(uint8_t *frame, uint32_t anim_ms) {
             if (by >= PANEL_HEIGHT) {
                 by = PANEL_HEIGHT - 1;
             }
-            put(frame, cx, by - 1, fire_r[phase], fire_g[phase], fire_b[phase]);
-            put(frame, cx - 1, by, fire_r[(phase + 1) % 3], fire_g[(phase + 1) % 3], fire_b[(phase + 1) % 3]);
-            put(frame, cx, by, fire_r[(phase + 2) % 3], fire_g[(phase + 2) % 3], fire_b[(phase + 2) % 3]);
-            put(frame, cx + 1, by, fire_r[phase], fire_g[phase], fire_b[phase]);
+            put_flame(frame, cx, by - 1, fire_r[phase], fire_g[phase], fire_b[phase], glow);
+            put_flame(frame, cx - 1, by, fire_r[(phase + 1) % 3], fire_g[(phase + 1) % 3], fire_b[(phase + 1) % 3], glow);
+            put_flame(frame, cx, by, fire_r[(phase + 2) % 3], fire_g[(phase + 2) % 3], fire_b[(phase + 2) % 3], glow);
+            put_flame(frame, cx + 1, by, fire_r[phase], fire_g[phase], fire_b[phase], glow);
         } else {
             int ox = x + 2;
             int oy = y;
@@ -2397,9 +2451,9 @@ static void paint(uint8_t *frame, uint32_t anim_ms) {
             if (oy + 1 >= PANEL_HEIGHT) {
                 oy = PANEL_HEIGHT - 2;
             }
-            put(frame, ox, oy, fire_r[phase], fire_g[phase], fire_b[phase]);
-            put(frame, ox + 1, oy + 1, fire_r[(phase + 1) % 3], fire_g[(phase + 1) % 3], fire_b[(phase + 1) % 3]);
-            put(frame, ox, oy - 1, fire_r[(phase + 2) % 3], fire_g[(phase + 2) % 3], fire_b[(phase + 2) % 3]);
+            put_flame(frame, ox, oy, fire_r[phase], fire_g[phase], fire_b[phase], glow);
+            put_flame(frame, ox + 1, oy + 1, fire_r[(phase + 1) % 3], fire_g[(phase + 1) % 3], fire_b[(phase + 1) % 3], glow);
+            put_flame(frame, ox, oy - 1, fire_r[(phase + 2) % 3], fire_g[(phase + 2) % 3], fire_b[(phase + 2) % 3], glow);
         }
     }
 }
@@ -2411,6 +2465,7 @@ static void boot(uint32_t seed) {
     night = false;
     village_count = 0;
     person_n = 0;
+    live_ms = 0;
     scan_cursor = 0;
     grow_ms = 0;
     spark_write = 0;
@@ -2450,6 +2505,10 @@ void civ_green(uint32_t now_ms, int window_ms) {
         return;
     }
     last_green = now_ms;
+}
+
+void civ_resume() {
+    last_green = 0;
 }
 
 void civ_start() {

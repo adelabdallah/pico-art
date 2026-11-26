@@ -57,6 +57,7 @@
 // On aurora, green steps the curtain hue, and a hold spins it. The lake follows the curtains.
 // On stars, louder music twinkles the stars faster and lifts them a little. The buttons keep their shared actions.
 // On civ, green pressed twice inside the double-click window solves a new map.
+// A double click into settings and back keeps that map. Any other departure starts a new one.
 // On lighthouse, ferris wheel, and galaxy, the encoder changes how fast the beam, the wheel, and the disk move. Clockwise is faster. The sea, the rim lights, and the stars keep their own pace.
 // On flow field, the encoder sets how much of the panel the streams cover. Clockwise is denser, from about 15 percent of the panel up to about 75 percent. On four panels the busy end stops where the scratch memory runs out.
 // A beat bends the field, brightens the streams, shifts their hue, and hurries them, and adds extra streams in proportion to that cover. At the busy end it adds about as many again, and they collapse. On four panels those extras appear only while room remains. The dim field keeps its light and turns with the bend.
@@ -336,6 +337,8 @@ static bool click_wait = false;
 static uint32_t click_at = 0;
 // Where a double click into settings returns. A later pattern change drops it. Boot starts with none.
 static int return_pattern = -1;
+// Civ keeps its arena across the settings double-click trip, and only that trip.
+static bool civ_held = false;
 
 static bool hue_tap = false;
 static bool hue_spin = false;
@@ -848,12 +851,19 @@ static void clear_hue() {
     settings.hue = 0.0f;
 }
 
-static void commit_pattern(int index) {
+static bool pattern_named(int index, const char *name) {
+    return index >= 0 && index < PATTERN_COUNT && std::strcmp(patterns[index].name, name) == 0;
+}
+
+static void commit_pattern(int index, bool preserve_arena = false) {
     flight_dir = 0;
     if (index < 0) {
         index = PATTERN_COUNT - 1;
     } else if (index >= PATTERN_COUNT) {
         index = 0;
+    }
+    if (!preserve_arena) {
+        civ_held = false;
     }
     bool changed = index != settings.pattern;
     if (changed) {
@@ -865,7 +875,9 @@ static void commit_pattern(int index) {
     anim_ms = 0;
     anim_frac = 0.0f;
     reset_play();
-    pattern_reset();
+    if (!preserve_arena) {
+        pattern_reset();
+    }
     patterns[settings.pattern].start();
     if (on_campfire()) {
         view_angle = 0.0f;
@@ -1955,17 +1967,44 @@ static void open_pattern_list() {
     show_status();
 }
 
+static void resume_civ(int index) {
+    flight_dir = 0;
+    bool changed = index != settings.pattern;
+    if (changed) {
+        store_view(settings.pattern);
+        load_view(index);
+        clear_hue();
+    }
+    settings.pattern = index;
+    civ_held = false;
+    return_pattern = -1;
+    civ_resume();
+    show_status();
+    if (changed) {
+        save_settings(settings);
+    }
+}
+
 static void jump_settings() {
     if (on_settings()) {
         if (return_pattern < 0 || return_pattern >= PATTERN_COUNT - 1) {
             return;
         }
-        commit_pattern(return_pattern);
+        int back = return_pattern;
+        bool restore = civ_held && pattern_named(back, "civ");
+        civ_held = false;
+        if (restore) {
+            resume_civ(back);
+            return;
+        }
+        commit_pattern(back);
         return;
     }
     int from = settings.pattern;
-    commit_pattern(PATTERN_COUNT - 1);
+    bool hold = pattern_named(from, "civ");
+    commit_pattern(PATTERN_COUNT - 1, hold);
     return_pattern = from;
+    civ_held = hold;
 }
 
 static void poll_encoder(uint32_t now) {
